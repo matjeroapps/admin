@@ -3,9 +3,9 @@ module github.com/matjeroapps/admin
 go 1.26
 
 require (
-	github.com/matjeroapps/core v0.0.0
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/go-chi/chi/v5 v5.2.3
+	github.com/matjeroapps/core v0.0.0-20260831221729-6a3a841a5736
 )
 
 require (
