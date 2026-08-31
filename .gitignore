@@ -1,0 +1,10 @@
+.env
+.DS_Store
+node_modules/
+dist/
+.next/
+coverage/
+*.tsbuildinfo
+*.log
+go.work
+go.work.sum
