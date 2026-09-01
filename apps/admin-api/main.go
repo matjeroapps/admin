@@ -1,20 +1,26 @@
+// Command admin-api serves the Admin Platform HTTP surface.
+//
+// It owns request parsing, end-user authentication, and the public response
+// contract. Every business capability is a Core-owned runtime call over the
+// internal API (ADR-017); this service holds no database connection and imports
+// no Core Go package.
 package main
 
 import (
 	"context"
 	"log"
 
+	"github.com/go-chi/chi/v5"
+
+	"github.com/matjeroapps/admin/internal/actorapi"
 	"github.com/matjeroapps/admin/internal/adminapi"
+	"github.com/matjeroapps/admin/internal/auth"
+	"github.com/matjeroapps/admin/internal/config"
+	"github.com/matjeroapps/admin/internal/coreclient"
+	"github.com/matjeroapps/admin/internal/httpx"
+	"github.com/matjeroapps/admin/internal/logging"
+	"github.com/matjeroapps/admin/internal/observability"
 	"github.com/matjeroapps/admin/internal/openapi"
-	"github.com/matjeroapps/core/packages/auth"
-	"github.com/matjeroapps/core/packages/config"
-	"github.com/matjeroapps/core/packages/database"
-	"github.com/matjeroapps/core/packages/httpx"
-	"github.com/matjeroapps/core/packages/logging"
-	"github.com/matjeroapps/core/packages/observability"
-	"github.com/matjeroapps/core/pkg/actorapi"
-	"github.com/matjeroapps/core/pkg/commerce"
-	"github.com/matjeroapps/core/pkg/markets"
 )
 
 func main() {
@@ -36,11 +42,15 @@ func run(ctx context.Context) error {
 	}
 	defer func() { _ = shutdown(context.Background()) }()
 
-	db, err := database.Connect(ctx, cfg)
+	core, err := coreclient.New(coreclient.Config{
+		BaseURL: cfg.CoreAPIBaseURL,
+		Token:   cfg.CoreAPIToken,
+		Service: "admin",
+		Timeout: cfg.CoreAPITimeout,
+	})
 	if err != nil {
 		return err
 	}
-	defer db.Close()
 
 	verifier, err := auth.NewOIDCVerifier(ctx, auth.Config{
 		IssuerURL:  cfg.ZitadelIssuer,
@@ -51,37 +61,41 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	repo := commerce.NewRepository(db.Pool)
-	service := commerce.NewService(repo)
-	marketService := markets.NewService(markets.NewRepository(db.Pool))
 	appCfg := httpx.ConfigFrom(cfg)
 	router := httpx.NewRouter(httpx.App{
 		Config: appCfg,
 		Logger: logger,
-		Ready: func(ctx context.Context) error {
-			return db.Ping(ctx)
-		},
+		// Readiness reflects the dependencies this service actually has. It has
+		// no database; Core reachability is surfaced per request as a 503 rather
+		// than failing readiness, so a Core blip does not restart every admin
+		// replica.
+		Ready: func(context.Context) error { return nil },
 	})
-	if spec, err := openapi.BuildAdminSpec(); err == nil {
-		if specBytes, err := openapi.MarshalDocument(spec); err == nil {
-			router.Mount("/", openapi.NewRouter(openapi.RouterConfig{
-				Enabled:   cfg.OpenAPIDocsEnabled,
-				SpecPath:  "/openapi.json",
-				DocsPath:  "/docs",
-				SpecBytes: specBytes,
-			}))
-		} else {
-			return err
-		}
-	} else {
+
+	spec, err := openapi.BuildAdminSpec()
+	if err != nil {
 		return err
 	}
+	specBytes, err := openapi.MarshalDocument(spec)
+	if err != nil {
+		return err
+	}
+	router.Mount("/", openapi.NewRouter(openapi.RouterConfig{
+		Enabled:   cfg.OpenAPIDocsEnabled,
+		SpecPath:  "/openapi.json",
+		DocsPath:  "/docs",
+		SpecBytes: specBytes,
+	}))
+
 	router.Mount("/", actorapi.NewRouter(actorapi.Config{
 		AppName:      "Admin API",
 		Actor:        "admin",
 		RequireAuth:  true,
 		AllowedRoles: []string{auth.RolePlatformAdmin},
-		Register:     adminapi.RegisterAdminRoutes(adminapi.Dependencies{Commerce: service, Repo: repo}),
-	}, marketService, verifier))
+		Register: func(r chi.Router) {
+			adminapi.RegisterAdminRoutes(adminapi.Dependencies{Core: core})(r)
+		},
+	}, core, verifier))
+
 	return httpx.Run(ctx, appCfg, logger, router)
 }
