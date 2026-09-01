@@ -5,8 +5,8 @@ import (
 
 	"github.com/getkin/kin-openapi/openapi3"
 
-	"github.com/matjeroapps/core/pkg/commerce"
-	"github.com/matjeroapps/core/pkg/contracts"
+	"github.com/matjeroapps/admin/internal/contracts"
+	"github.com/matjeroapps/admin/internal/coreclient"
 )
 
 func BuildAdminSpec() (*openapi3.T, error) {
@@ -14,8 +14,8 @@ func BuildAdminSpec() (*openapi3.T, error) {
 		Title:         "Matjero Admin API",
 		Description:   "OpenAPI contract for the Matjero Admin API.",
 		Authenticated: true,
-		Tags:          openAPITags(),
-		Routes:        append(actorRoutes(true), adminRoutes()...),
+		Tags:          CommonTags(),
+		Routes:        append(ActorRoutes(true), adminRoutes()...),
 	})
 }
 
@@ -30,10 +30,10 @@ func adminRoutes() []RouteSpec {
 			Tags:        []string{"Audit"},
 			Auth:        true,
 			Responses: []ResponseSpec{
-				okResponse("Platform overview", contracts.CountResponse{}),
-				errorResponse(http.StatusUnauthorized, "Unauthorized"),
-				errorResponse(http.StatusForbidden, "Forbidden"),
-				errorResponse(http.StatusInternalServerError, "Internal error"),
+				OKResponse("Platform overview", contracts.CountResponse{}),
+				ErrorResponse(http.StatusUnauthorized, "Unauthorized"),
+				ErrorResponse(http.StatusForbidden, "Forbidden"),
+				ErrorResponse(http.StatusInternalServerError, "Internal error"),
 			},
 		},
 		{
@@ -43,8 +43,8 @@ func adminRoutes() []RouteSpec {
 			Summary:     "List suppliers",
 			Tags:        []string{"Suppliers"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{limitParam(), offsetParam()},
-			Responses:   listResponses[commerce.Supplier]("Supplier collection"),
+			Parameters:  []ParameterSpec{LimitParam(), OffsetParam()},
+			Responses:   ListResponses[coreclient.Supplier]("Supplier collection"),
 		},
 		{
 			Method:      http.MethodPost,
@@ -53,9 +53,9 @@ func adminRoutes() []RouteSpec {
 			Summary:     "Update a supplier status",
 			Tags:        []string{"Suppliers", "Audit"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{pathStringParam("id", "Supplier identifier")},
+			Parameters:  []ParameterSpec{PathStringParam("id", "Supplier identifier")},
 			RequestBody: contracts.StatusUpdateRequest{},
-			Responses:   authOKResponses("Supplier status updated", contracts.StatusResponse{}),
+			Responses:   AuthOKResponses("Supplier status updated", contracts.StatusResponse{}),
 		},
 		{
 			Method:      http.MethodGet,
@@ -64,8 +64,8 @@ func adminRoutes() []RouteSpec {
 			Summary:     "List sellers",
 			Tags:        []string{"Sellers"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{limitParam(), offsetParam()},
-			Responses:   listResponses[commerce.Seller]("Seller collection"),
+			Parameters:  []ParameterSpec{LimitParam(), OffsetParam()},
+			Responses:   ListResponses[coreclient.Seller]("Seller collection"),
 		},
 		{
 			Method:      http.MethodPost,
@@ -74,9 +74,9 @@ func adminRoutes() []RouteSpec {
 			Summary:     "Update a seller status",
 			Tags:        []string{"Sellers", "Audit"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{pathStringParam("id", "Seller identifier")},
+			Parameters:  []ParameterSpec{PathStringParam("id", "Seller identifier")},
 			RequestBody: contracts.StatusUpdateRequest{},
-			Responses:   authOKResponses("Seller status updated", contracts.StatusResponse{}),
+			Responses:   AuthOKResponses("Seller status updated", contracts.StatusResponse{}),
 		},
 		{
 			Method:      http.MethodGet,
@@ -85,8 +85,8 @@ func adminRoutes() []RouteSpec {
 			Summary:     "List stores",
 			Tags:        []string{"Stores"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{limitParam(), offsetParam()},
-			Responses:   listResponses[commerce.Store]("Store collection"),
+			Parameters:  []ParameterSpec{LimitParam(), OffsetParam()},
+			Responses:   ListResponses[coreclient.Store]("Store collection"),
 		},
 		{
 			Method:      http.MethodPost,
@@ -95,9 +95,9 @@ func adminRoutes() []RouteSpec {
 			Summary:     "Update a store status",
 			Tags:        []string{"Stores", "Audit"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{pathStringParam("id", "Store identifier")},
+			Parameters:  []ParameterSpec{PathStringParam("id", "Store identifier")},
 			RequestBody: contracts.StatusUpdateRequest{},
-			Responses:   authOKResponses("Store status updated", contracts.StatusResponse{}),
+			Responses:   AuthOKResponses("Store status updated", contracts.StatusResponse{}),
 		},
 		{
 			Method:      http.MethodGet,
@@ -106,8 +106,8 @@ func adminRoutes() []RouteSpec {
 			Summary:     "List products",
 			Tags:        []string{"Catalog", "Attributes", "Variants", "SKUs"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{limitParam(), offsetParam()},
-			Responses:   listResponses[commerce.Product]("Product collection"),
+			Parameters:  []ParameterSpec{LimitParam(), OffsetParam()},
+			Responses:   ListResponses[coreclient.Product]("Product collection"),
 		},
 		{
 			Method:      http.MethodPost,
@@ -116,9 +116,9 @@ func adminRoutes() []RouteSpec {
 			Summary:     "Update a product status",
 			Tags:        []string{"Catalog", "Audit"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{pathStringParam("id", "Product identifier")},
+			Parameters:  []ParameterSpec{PathStringParam("id", "Product identifier")},
 			RequestBody: contracts.StatusUpdateRequest{},
-			Responses:   authOKResponses("Product status updated", contracts.StatusResponse{}),
+			Responses:   AuthOKResponses("Product status updated", contracts.StatusResponse{}),
 		},
 		{
 			Method:      http.MethodGet,
@@ -127,8 +127,8 @@ func adminRoutes() []RouteSpec {
 			Summary:     "List categories",
 			Tags:        []string{"Categories"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{limitParam(), offsetParam()},
-			Responses:   listResponses[commerce.Category]("Category collection"),
+			Parameters:  []ParameterSpec{LimitParam(), OffsetParam()},
+			Responses:   ListResponses[coreclient.Category]("Category collection"),
 		},
 		{
 			Method:      http.MethodPost,
@@ -137,9 +137,9 @@ func adminRoutes() []RouteSpec {
 			Summary:     "Update a category status",
 			Tags:        []string{"Categories", "Audit"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{pathStringParam("id", "Category identifier")},
+			Parameters:  []ParameterSpec{PathStringParam("id", "Category identifier")},
 			RequestBody: contracts.StatusUpdateRequest{},
-			Responses:   authOKResponses("Category status updated", contracts.StatusResponse{}),
+			Responses:   AuthOKResponses("Category status updated", contracts.StatusResponse{}),
 		},
 		{
 			Method:      http.MethodGet,
@@ -148,8 +148,8 @@ func adminRoutes() []RouteSpec {
 			Summary:     "List supplier offers",
 			Tags:        []string{"Supplier Offers"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{limitParam(), offsetParam(), stringParam("market_code", "Filter by market code", false)},
-			Responses:   listResponses[commerce.SupplierCatalogItem]("Supplier offer collection"),
+			Parameters:  []ParameterSpec{LimitParam(), OffsetParam(), StringParam("market_code", "Filter by market code", false)},
+			Responses:   ListResponses[coreclient.SupplierCatalogItem]("Supplier offer collection"),
 		},
 		{
 			Method:      http.MethodPost,
@@ -158,9 +158,9 @@ func adminRoutes() []RouteSpec {
 			Summary:     "Update a supplier offer status",
 			Tags:        []string{"Supplier Offers", "Audit"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{pathStringParam("id", "Supplier offer identifier")},
+			Parameters:  []ParameterSpec{PathStringParam("id", "Supplier offer identifier")},
 			RequestBody: contracts.StatusUpdateRequest{},
-			Responses:   authOKResponses("Supplier offer status updated", contracts.StatusResponse{}),
+			Responses:   AuthOKResponses("Supplier offer status updated", contracts.StatusResponse{}),
 		},
 		{
 			Method:      http.MethodGet,
@@ -169,8 +169,8 @@ func adminRoutes() []RouteSpec {
 			Summary:     "List seller listings",
 			Tags:        []string{"Seller Listings"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{limitParam(), offsetParam(), stringParam("store_id", "Filter by store identifier", false)},
-			Responses:   listResponses[commerce.SellerListing]("Seller listing collection"),
+			Parameters:  []ParameterSpec{LimitParam(), OffsetParam(), StringParam("store_id", "Filter by store identifier", false)},
+			Responses:   ListResponses[coreclient.SellerListing]("Seller listing collection"),
 		},
 		{
 			Method:      http.MethodPost,
@@ -179,9 +179,9 @@ func adminRoutes() []RouteSpec {
 			Summary:     "Update a seller listing status",
 			Tags:        []string{"Seller Listings", "Audit"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{pathStringParam("id", "Seller listing identifier")},
+			Parameters:  []ParameterSpec{PathStringParam("id", "Seller listing identifier")},
 			RequestBody: contracts.StatusUpdateRequest{},
-			Responses:   authOKResponses("Seller listing status updated", contracts.StatusResponse{}),
+			Responses:   AuthOKResponses("Seller listing status updated", contracts.StatusResponse{}),
 		},
 		{
 			Method:      http.MethodGet,
@@ -190,8 +190,8 @@ func adminRoutes() []RouteSpec {
 			Summary:     "List fulfillment locations",
 			Tags:        []string{"Fulfillment Locations"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{limitParam(), offsetParam(), stringParam("supplier_id", "Filter by supplier identifier", false)},
-			Responses:   listResponses[commerce.FulfillmentLocation]("Fulfillment location collection"),
+			Parameters:  []ParameterSpec{LimitParam(), OffsetParam(), StringParam("supplier_id", "Filter by supplier identifier", false)},
+			Responses:   ListResponses[coreclient.FulfillmentLocation]("Fulfillment location collection"),
 		},
 		{
 			Method:      http.MethodPost,
@@ -200,9 +200,9 @@ func adminRoutes() []RouteSpec {
 			Summary:     "Update a fulfillment location status",
 			Tags:        []string{"Fulfillment Locations", "Audit"},
 			Auth:        true,
-			Parameters:  []ParameterSpec{pathStringParam("id", "Fulfillment location identifier")},
+			Parameters:  []ParameterSpec{PathStringParam("id", "Fulfillment location identifier")},
 			RequestBody: contracts.StatusUpdateRequest{},
-			Responses:   authOKResponses("Fulfillment location status updated", contracts.StatusResponse{}),
+			Responses:   AuthOKResponses("Fulfillment location status updated", contracts.StatusResponse{}),
 		},
 	}
 }

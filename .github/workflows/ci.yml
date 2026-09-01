@@ -19,9 +19,56 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
-      - run: go build ./...
-      - run: go vet ./...
-      - run: go test ./...
+      # GOWORK=off proves the repository builds without the local development
+      # workspace, which is what a fresh clone and a Docker build do.
+      - run: GOWORK=off go mod tidy
+      - name: no uncommitted go.mod/go.sum changes after tidy
+        run: git diff --exit-code -- go.mod go.sum
+      - run: GOWORK=off go build ./...
+      - name: build admin-api
+        run: GOWORK=off go build -o /dev/null ./apps/admin-api
+      - run: GOWORK=off go vet ./...
+      - run: GOWORK=off go test ./...
+
+  # Repository Independence guard (ADR-017). Fails if a contributor reintroduces
+  # a compile-time dependency on another Matjero repository. Only build-bearing
+  # files are scanned, so documentation that names another service is fine.
+  independence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - name: no other Matjero Go module
+        run: |
+          modules=$(GOWORK=off go list -m all | grep '^github.com/matjeroapps/' | grep -v '^github.com/matjeroapps/admin$' || true)
+          if [ -n "$modules" ]; then
+            echo "Repository Independence Rule violated. Other Matjero modules:"
+            echo "$modules"
+            exit 1
+          fi
+      - name: no Matjero imports in Go sources
+        run: |
+          matches=$(grep -rn 'github.com/matjeroapps/\(core\|seller\|supplier\|seller-hub\|supplier-hub\)' \
+            --include='*.go' apps cmd internal || true)
+          if [ -n "$matches" ]; then
+            echo "Repository Independence Rule violated. Cross-repo imports:"
+            echo "$matches"
+            exit 1
+          fi
+      - name: no go.work committed
+        run: |
+          if [ -f go.work ] || [ -f go.work.sum ]; then
+            echo "go.work must never be committed"
+            exit 1
+          fi
+      - name: no replace directives
+        run: |
+          if grep -q '^replace ' go.mod; then
+            echo "go.mod must not contain replace directives"
+            exit 1
+          fi
 
   openapi:
     runs-on: ubuntu-latest
@@ -30,7 +77,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.x"
-      - run: go run ./cmd/openapi-gen
+      - run: GOWORK=off go run ./cmd/openapi-gen
       - name: stale spec check
         run: git diff --exit-code -- docs/api
 
@@ -59,7 +106,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22.x"
-      - run: go list -m all
+      - run: GOWORK=off go list -m all
       - run: npm audit --audit-level=high
       # gitleaks-action v3 requires a paid license for organization accounts;
       # the CLI is MIT-licensed and needs none.
