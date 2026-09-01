@@ -15,36 +15,57 @@ type RouterConfig struct {
 	SpecBytes []byte
 }
 
-func NewRouter(cfg RouterConfig) chi.Router {
-	r := chi.NewRouter()
+// Register registers the spec and docs routes directly on r.
+//
+// Prefer this over NewRouter for an application's root router. chi allows only
+// one Mount at a given path, so mounting a docs sub-router at "/" makes a second
+// Mount("/") for the application routes panic at startup.
+func Register(r chi.Router, cfg RouterConfig) {
 	if !cfg.Enabled {
-		return r
+		return
 	}
 
-	specPath := cfg.SpecPath
+	specPath, docsPath := paths(cfg)
+
+	r.Get(specPath, specHandler(cfg.SpecBytes))
+	swagger := httpSwagger.Handler(httpSwagger.URL(specPath))
+	r.Get(docsPath, docsIndexHandler(swagger, docsPath))
+	r.Handle(docsPath+"/*", swagger)
+}
+
+// NewRouter returns a standalone router serving the spec and docs. It is kept for
+// callers that mount the docs under a non-root prefix.
+func NewRouter(cfg RouterConfig) chi.Router {
+	r := chi.NewRouter()
+	Register(r, cfg)
+	return r
+}
+
+func paths(cfg RouterConfig) (specPath, docsPath string) {
+	specPath = cfg.SpecPath
 	if specPath == "" {
 		specPath = "/openapi.json"
 	}
 
-	docsPath := cfg.DocsPath
+	docsPath = cfg.DocsPath
 	if docsPath == "" {
 		docsPath = "/docs"
 	}
-	docsPath = strings.TrimRight(docsPath, "/")
+	return specPath, strings.TrimRight(docsPath, "/")
+}
 
-	r.Get(specPath, func(w http.ResponseWriter, r *http.Request) {
+func specHandler(specBytes []byte) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(cfg.SpecBytes)
-	})
+		_, _ = w.Write(specBytes)
+	}
+}
 
-	swaggerHandler := httpSwagger.Handler(httpSwagger.URL(specPath))
-	r.Get(docsPath, func(w http.ResponseWriter, req *http.Request) {
+func docsIndexHandler(swagger http.Handler, docsPath string) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
 		cloned := req.Clone(req.Context())
 		cloned.RequestURI = docsPath + "/index.html"
 		cloned.URL.Path = docsPath + "/index.html"
-		swaggerHandler.ServeHTTP(w, cloned)
-	})
-	r.Handle(docsPath+"/*", swaggerHandler)
-
-	return r
+		swagger.ServeHTTP(w, cloned)
+	}
 }

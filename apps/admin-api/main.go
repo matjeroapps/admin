@@ -80,12 +80,12 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	router.Mount("/", openapi.NewRouter(openapi.RouterConfig{
+	openapi.Register(router, openapi.RouterConfig{
 		Enabled:   cfg.OpenAPIDocsEnabled,
 		SpecPath:  "/openapi.json",
 		DocsPath:  "/docs",
 		SpecBytes: specBytes,
-	}))
+	})
 
 	router.Mount("/", actorapi.NewRouter(actorapi.Config{
 		AppName:      "Admin API",
