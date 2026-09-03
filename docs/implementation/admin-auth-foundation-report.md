@@ -3,7 +3,7 @@
 ## Metadata
 - **Branch**: `feature/admin-auth-foundation`
 - **Base SHA**: `c42c79bcf5698235784070ceb38e078caf38c982`
-- **Head SHA**: `c6b497f4d9554c1389ecb6923ccc6528b75ce3cb`
+- **Head SHA**: `ca22156475d6910ea57ce0eb058448ec6222b467`
 - **PR URL**: https://github.com/matjeroapps/admin/pull/3
 - **PR Title**: `feat: add admin browser authentication`
 
