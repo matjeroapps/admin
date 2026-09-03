@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { User } from 'oidc-client-ts';
-import { createOidcAuthClient, sanitizeReturnPath, checkDevAuthEnabled, type UserManagerLike } from './oidc';
+import { createOidcAuthClient, createOidcUserManagerSettings, sanitizeReturnPath, checkDevAuthEnabled, type UserManagerLike } from './oidc';
 
 function mockUser(overrides?: Partial<User>): User {
   return {
@@ -30,6 +30,7 @@ function mockUser(overrides?: Partial<User>): User {
 type MockUserManager = UserManagerLike & {
   userLoadedCb?: (u: User) => void;
   userUnloadedCb?: () => void;
+  tokenExpiringCb?: () => void;
   tokenExpiredCb?: () => void;
   setCurrentUser: (u: User | null) => void;
 };
@@ -60,6 +61,9 @@ function mockUserManager(): MockUserManager {
       addUserUnloaded: (cb: () => void) => {
         mgr.userUnloadedCb = cb;
       },
+      addAccessTokenExpiring: (cb: () => void) => {
+        mgr.tokenExpiringCb = cb;
+      },
       addAccessTokenExpired: (cb: () => void) => {
         mgr.tokenExpiredCb = cb;
       }
@@ -70,6 +74,15 @@ function mockUserManager(): MockUserManager {
   };
   return mgr;
 }
+
+describe('createOidcUserManagerSettings', () => {
+  it('disables automaticSilentRenew to enforce Matjero AuthClient as single renewal authority', () => {
+    const settings = createOidcUserManagerSettings('https://auth.example.com', 'admin-client', 'https://admin.example.com/auth/callback', 'https://admin.example.com');
+    expect(settings.automaticSilentRenew).toBe(false);
+    expect(settings.authority).toBe('https://auth.example.com');
+    expect(settings.client_id).toBe('admin-client');
+  });
+});
 
 describe('checkDevAuthEnabled matrix', () => {
   it('activates ONLY when DEV=true AND VITE_ADMIN_DEV_AUTH="true"', () => {
@@ -108,11 +121,26 @@ describe('createOidcAuthClient', () => {
     um.setCurrentUser(validUser);
 
     const client = createOidcAuthClient({ userManager: um });
-    await Promise.resolve(); // drain microtasks
+    await Promise.resolve();
 
     expect(client.getState().isAuthenticated).toBe(true);
     expect(client.getState().user?.subject).toBe('usr_admin_1');
     expect(await client.getAccessToken()).toBe('access-token-123');
+  });
+
+  it('handles initialization rejection by entering Authentication Error state with sanitized error message', async () => {
+    const um = mockUserManager();
+    um.getUser = vi.fn(async () => {
+      throw new Error('Raw storage failure exception');
+    });
+
+    const client = createOidcAuthClient({ userManager: um });
+    await new Promise<void>((r) => queueMicrotask(() => r()));
+
+    expect(client.getState().isAuthenticated).toBe(false);
+    expect(client.getState().user).toBeNull();
+    expect(client.getState().isLoading).toBe(false);
+    expect(client.getState().error).toBe('Authentication initialization failed');
   });
 
   it('handles login initiation with returnPath', async () => {
@@ -133,6 +161,19 @@ describe('createOidcAuthClient', () => {
     expect(returnPath).toBe('/dashboard');
     expect(client.getState().isAuthenticated).toBe(true);
     expect(client.getState().user?.subject).toBe('usr_admin_1');
+  });
+
+  it('handles callback rejection by setting sanitized error message', async () => {
+    const um = mockUserManager();
+    um.signinRedirectCallback = vi.fn(async () => {
+      throw new Error('Invalid grant code raw error');
+    });
+
+    const client = createOidcAuthClient({ userManager: um });
+    await expect(client.handleCallback('https://admin.example.com/auth/callback?error=invalid_grant')).rejects.toThrow('Authentication callback failed');
+
+    expect(client.getState().isAuthenticated).toBe(false);
+    expect(client.getState().error).toBe('Authentication callback failed');
   });
 
   it('handles logout and user session clearance to unauthenticated state with null error', async () => {
@@ -176,6 +217,33 @@ describe('createOidcAuthClient', () => {
     expect(nextToken).toBe('single-flight-token');
   });
 
+  it('deduplicates simultaneous token event and API renewal calls into single signinSilent execution', async () => {
+    let resolveBarrier!: (u: User) => void;
+    const pendingPromise = new Promise<User>((resolve) => {
+      resolveBarrier = resolve;
+    });
+
+    const um = mockUserManager();
+    um.setCurrentUser(mockUser({ expired: true }));
+    um.signinSilent = vi.fn(async () => pendingPromise);
+
+    const client = createOidcAuthClient({ userManager: um });
+    await Promise.resolve();
+
+    // Trigger token expiring event AND concurrent getAccessToken API call
+    um.tokenExpiringCb?.();
+    const tokenPromise = client.getAccessToken();
+    const renewPromise = client.renewToken();
+
+    expect(um.signinSilent).toHaveBeenCalledTimes(1);
+
+    resolveBarrier(mockUser({ access_token: 'event-shared-token' }));
+
+    const [t1, t2] = await Promise.all([tokenPromise, renewPromise]);
+    expect(t1).toBe('event-shared-token');
+    expect(t2).toBe('event-shared-token');
+  });
+
   it('getAccessToken reuses single-flight renewToken path when user is expired', async () => {
     const um = mockUserManager();
     const expiredUser = mockUser({ expired: true });
@@ -187,17 +255,6 @@ describe('createOidcAuthClient', () => {
     const renewedToken = await client.getAccessToken();
     expect(renewedToken).toBe('renewed-access-token');
     expect(um.signinSilent).toHaveBeenCalledTimes(1);
-  });
-
-  it('handles token expiration event cleanly', async () => {
-    const um = mockUserManager();
-    um.setCurrentUser(mockUser());
-    const client = createOidcAuthClient({ userManager: um });
-    await Promise.resolve();
-
-    um.tokenExpiredCb?.();
-    expect(client.getState().isAuthenticated).toBe(false);
-    expect(client.getState().error).toBeNull();
   });
 
   it('fails closed when missing production OIDC configuration', async () => {

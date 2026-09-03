@@ -33,6 +33,25 @@ describe('App Top-Level Authentication States & Callback Handling', () => {
     vi.restoreAllMocks();
   });
 
+  it('renders Authentication Error state when initialization fails and makes no business API calls', () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const authClient = mockAuthClient({
+      isAuthenticated: false,
+      user: null,
+      isLoading: false,
+      error: 'Authentication initialization failed'
+    });
+
+    render(<App authClient={authClient} />);
+
+    expect(screen.getByTestId('auth-error')).toBeDefined();
+    expect(screen.getByText('Authentication initialization failed')).toBeDefined();
+    expect(screen.getByText('Try Again')).toBeDefined();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('handles realistic OAuth callback processing and scrubs URL parameters', async () => {
     const originalLocation = window.location.href;
     const replaceStateSpy = vi.spyOn(window.history, 'replaceState');

@@ -3,7 +3,7 @@
 ## Metadata
 - **Branch**: `feature/admin-auth-foundation`
 - **Base SHA**: `c42c79bcf5698235784070ceb38e078caf38c982`
-- **Head SHA**: `ca22156475d6910ea57ce0eb058448ec6222b467`
+- **Reviewed Implementation Head**: `ca22156475d6910ea57ce0eb058448ec6222b467`
 - **PR URL**: https://github.com/matjeroapps/admin/pull/3
 - **PR Title**: `feat: add admin browser authentication`
 
@@ -11,19 +11,26 @@
 - **OIDC Library**: `oidc-client-ts` (^3.5.0)
 - **Flow**: OAuth 2.0 Authorization Code with PKCE. No browser client secret.
 - **Token Storage**: State stored in `WebStorageStateStore` backed by `window.sessionStorage`. Tokens are never written to `localStorage` or logged.
-- **Single-Flight Token Renewal Design**:
+- **Single Renewal Authority Design**:
+  - `automaticSilentRenew: false` is explicitly set in `createOidcUserManagerSettings`.
+  - Matjero `AuthClient` is the 100% sole renewal coordinator, avoiding race conditions between library-initiated and API-triggered renewals.
+  - Exactly ONE code path calls `userManager.signinSilent()` across the entire codebase (`performRenewal()`).
+  - Proactive token event handlers (`addAccessTokenExpiring`, `addAccessTokenExpired`) delegate directly to `renewToken()`.
   - `createOidcAuthClient` maintains a single in-flight `renewalPromise: Promise<string | null> | null`.
   - When multiple concurrent API requests trigger token renewal (or `getAccessToken()` detects an expired token), all callers await the exact same promise.
   - Exactly ONE `userManager.signinSilent()` operation is performed.
   - The shared promise is cleared (`renewalPromise = null`) in a `finally` block upon completion (success, failure, or null result) to guarantee stale/rejected promises are never cached.
-  - Verified by deterministic unit tests asserting `signinSilent` is called exactly ONCE for 10 concurrent renewal callers, and that subsequent calls initiate a new fresh renewal.
 - **Callback Routing & Hardening**:
   - Path-based callback at `/auth/callback` (never fragment-based `/#/auth/callback`).
   - Callback handler is explicitly invoked as `authClient.handleCallback(window.location.href)`.
   - On both successful and failed callback handling, OAuth parameters (`code`, `state`, `error`, `error_description`) are scrubbed from browser history via `window.history.replaceState`.
   - `sanitizeReturnPath` ensures return destinations are same-origin internal routes (e.g. `/dashboard`), preventing open redirects.
 
-## Authentication Behavior & Error Policy
+## Authentication Behavior & Error Sanitization
+- **Sanitized Initialization & Callback Errors**:
+  - Initialization failure (`getUser().catch()`) updates state to `{ isAuthenticated: false, user: null, isLoading: false, error: 'Authentication initialization failed' }`.
+  - Callback processing failure formats generic error string `'Authentication callback failed'`.
+  - Raw exception details, provider URLs, internal state strings, or tokens are never exposed in UI banners or browser URLs.
 - **Expected Session Termination vs. Auth Errors**:
   - `clearSession()` defaults to normal session clearance (`error: null`), clearing user state to `unauthenticated` (`isAuthenticated = false`, `user = null`, `error = null`).
   - Normal logout, session expiration, and repeated 401s transition cleanly to the `unauthenticated` screen displaying the "Sign in" action (NOT an error banner).
@@ -48,6 +55,7 @@ To support background session renewal via `signinSilent`, the ZITADEL instance m
 3. **Post Logout Redirect URIs**: `https://<admin-domain>`
 4. **Scopes**: `openid profile email offline_access`
 5. **Refresh Token Grant**: Refresh token / offline_access renewal must be enabled for the SPA application.
+6. **Renewal Coordinator**: Matjero AuthClient (with `automaticSilentRenew: false`) owns renewal coordination for compatibility with refresh-token rotation.
 
 ## Production Static Runtime
 - **Static Server**: Standalone zero-dependency Node.js server (`web/admin/server.js`) serving `web/admin/dist`.
@@ -59,12 +67,12 @@ To support background session renewal via `signinSilent`, the ZITADEL instance m
   - `GET /v1/*` / `GET /api/*` -> returns `404 JSON` (not index.html)
 
 ## Test Suite & Verification Results
-- **Frontend Test Infrastructure**: Vitest + Testing Library + jsdom (26 tests across 4 files) passed cleanly.
+- **Frontend Test Infrastructure**: Vitest + Testing Library + jsdom (30 tests across 4 files) passed cleanly.
 - **Static Routing Smoke**:
   ```text
   ADMIN CALLBACK STATIC ROUTING SMOKE: PASS
   ```
-- **Fresh Clone**: Verified outside workspace in `/tmp/fresh-admin-check-final`. All build, lint, typecheck, and test commands passed.
+- **Fresh Clone**: Verified outside workspace in `/tmp/fresh-admin-check-4`. All build, lint, typecheck, and test commands passed.
 - **Docker Build**: Verified image build using `docker/web-app.Dockerfile`.
 - **Go Backend & OpenAPI**: All Go unit tests, `go vet`, and OpenAPI spec generation passed with zero drift.
 

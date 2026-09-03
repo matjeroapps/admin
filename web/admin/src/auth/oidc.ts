@@ -24,6 +24,7 @@ export interface UserManagerLike {
   events: {
     addUserLoaded(cb: (user: User) => void): void;
     addUserUnloaded(cb: () => void): void;
+    addAccessTokenExpiring?(cb: () => void): void;
     addAccessTokenExpired(cb: () => void): void;
   };
 }
@@ -50,6 +51,24 @@ export function sanitizeReturnPath(path?: string): string {
 
 export function checkDevAuthEnabled(isDev: boolean, devAuthEnvVal?: string): boolean {
   return Boolean(isDev && devAuthEnvVal === 'true');
+}
+
+export function createOidcUserManagerSettings(
+  issuer: string,
+  clientId: string,
+  redirectUri: string,
+  postLogoutRedirectUri: string
+) {
+  return {
+    authority: issuer,
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    post_logout_redirect_uri: postLogoutRedirectUri,
+    response_type: 'code',
+    scope: 'openid profile email offline_access',
+    userStore: new WebStorageStateStore({ store: window.sessionStorage }),
+    automaticSilentRenew: false
+  };
 }
 
 export type OidcClientOptions = {
@@ -86,16 +105,7 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
 
   if (isOidcConfigured) {
     if (!userManager && issuer && clientId) {
-      userManager = new UserManager({
-        authority: issuer,
-        client_id: clientId,
-        redirect_uri: redirectUri,
-        post_logout_redirect_uri: postLogoutRedirectUri,
-        response_type: 'code',
-        scope: 'openid profile email offline_access',
-        userStore: new WebStorageStateStore({ store: window.sessionStorage }),
-        automaticSilentRenew: true
-      });
+      userManager = new UserManager(createOidcUserManagerSettings(issuer, clientId, redirectUri, postLogoutRedirectUri));
     }
 
     if (userManager) {
@@ -118,7 +128,7 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
             isAuthenticated: false,
             user: null,
             isLoading: false,
-            error: null
+            error: 'Authentication initialization failed'
           });
         });
 
@@ -130,8 +140,12 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
         updateState({ isAuthenticated: false, user: null, isLoading: false, error: null });
       });
 
+      userManager.events.addAccessTokenExpiring?.(() => {
+        void renewToken();
+      });
+
       userManager.events.addAccessTokenExpired(() => {
-        updateState({ isAuthenticated: false, user: null, isLoading: false, error: null });
+        void renewToken();
       });
     }
   } else if (isDevAuthEnabled) {
@@ -265,10 +279,20 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
     async handleCallback(url?: string): Promise<string> {
       const callbackUrl = url || window.location.href;
       if (userManager) {
-        const user = await userManager.signinRedirectCallback(callbackUrl);
-        updateState({ isAuthenticated: true, user: mapUser(user), isLoading: false, error: null });
-        const stateObj = user.state as { returnPath?: string } | undefined;
-        return sanitizeReturnPath(stateObj?.returnPath);
+        try {
+          const user = await userManager.signinRedirectCallback(callbackUrl);
+          updateState({ isAuthenticated: true, user: mapUser(user), isLoading: false, error: null });
+          const stateObj = user.state as { returnPath?: string } | undefined;
+          return sanitizeReturnPath(stateObj?.returnPath);
+        } catch {
+          updateState({
+            isAuthenticated: false,
+            user: null,
+            isLoading: false,
+            error: 'Authentication callback failed'
+          });
+          throw new Error('Authentication callback failed');
+        }
       }
       if (isDevAuthEnabled) {
         return '/';
