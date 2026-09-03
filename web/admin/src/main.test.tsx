@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { App } from './main';
-import type { AuthClient, AuthState, AuthUser } from './auth/oidc';
+import type { AuthClient, AuthState } from './auth/oidc';
 
 function mockAuthClient(initialState: AuthState): AuthClient & { listeners: Set<(s: AuthState) => void> } {
   let state = { ...initialState };
@@ -16,11 +16,11 @@ function mockAuthClient(initialState: AuthState): AuthClient & { listeners: Set<
     },
     login: vi.fn(async () => {}),
     logout: vi.fn(async () => {}),
-    handleCallback: vi.fn(async () => '/'),
+    handleCallback: vi.fn(async () => '/dashboard'),
     getAccessToken: vi.fn(async () => (state.isAuthenticated ? 'test-token' : null)),
     renewToken: vi.fn(async () => (state.isAuthenticated ? 'test-token' : null)),
-    clearSession: vi.fn(async () => {
-      state = { isAuthenticated: false, user: null, isLoading: false, error: null };
+    clearSession: vi.fn(async (options?: { error?: string | null }) => {
+      state = { isAuthenticated: false, user: null, isLoading: false, error: options?.error ?? null };
       for (const l of listeners) l(state);
     }),
     getUser: () => state.user,
@@ -28,9 +28,38 @@ function mockAuthClient(initialState: AuthState): AuthClient & { listeners: Set<
   };
 }
 
-describe('App Top-Level Authentication States', () => {
+describe('App Top-Level Authentication States & Callback Handling', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('handles realistic OAuth callback processing and scrubs URL parameters', async () => {
+    const originalLocation = window.location.href;
+    const replaceStateSpy = vi.spyOn(window.history, 'replaceState');
+
+    // Simulate browser landing on callback URL
+    delete (window as any).location;
+    window.location = new URL('https://admin.example.com/auth/callback?code=CODE123&state=STATE456') as any;
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const authClient = mockAuthClient({
+      isAuthenticated: false,
+      user: null,
+      isLoading: false,
+      error: null
+    });
+
+    render(<App authClient={authClient} />);
+
+    await waitFor(() => {
+      expect(authClient.handleCallback).toHaveBeenCalledWith('https://admin.example.com/auth/callback?code=CODE123&state=STATE456');
+    });
+
+    expect(replaceStateSpy).toHaveBeenCalledWith({}, expect.any(String), '/dashboard');
+
+    window.location = new URL(originalLocation) as any;
   });
 
   it('renders auth loading state', () => {

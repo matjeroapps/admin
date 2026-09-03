@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { User } from 'oidc-client-ts';
-import { createOidcAuthClient, sanitizeReturnPath, type UserManagerLike } from './oidc';
+import { createOidcAuthClient, sanitizeReturnPath, checkDevAuthEnabled, type UserManagerLike } from './oidc';
 
 function mockUser(overrides?: Partial<User>): User {
   return {
@@ -71,6 +71,16 @@ function mockUserManager(): MockUserManager {
   return mgr;
 }
 
+describe('checkDevAuthEnabled matrix', () => {
+  it('activates ONLY when DEV=true AND VITE_ADMIN_DEV_AUTH="true"', () => {
+    expect(checkDevAuthEnabled(false, 'true')).toBe(false);
+    expect(checkDevAuthEnabled(true, undefined)).toBe(false);
+    expect(checkDevAuthEnabled(true, 'false')).toBe(false);
+    expect(checkDevAuthEnabled(true, 'random')).toBe(false);
+    expect(checkDevAuthEnabled(true, 'true')).toBe(true);
+  });
+});
+
 describe('sanitizeReturnPath', () => {
   it('returns valid internal absolute path', () => {
     expect(sanitizeReturnPath('/suppliers')).toBe('/suppliers');
@@ -98,7 +108,7 @@ describe('createOidcAuthClient', () => {
     um.setCurrentUser(validUser);
 
     const client = createOidcAuthClient({ userManager: um });
-    await new Promise((r) => setTimeout(r, 10));
+    await Promise.resolve(); // drain microtasks
 
     expect(client.getState().isAuthenticated).toBe(true);
     expect(client.getState().user?.subject).toBe('usr_admin_1');
@@ -125,39 +135,69 @@ describe('createOidcAuthClient', () => {
     expect(client.getState().user?.subject).toBe('usr_admin_1');
   });
 
-  it('handles logout and user session clearance', async () => {
+  it('handles logout and user session clearance to unauthenticated state with null error', async () => {
     const um = mockUserManager();
     um.setCurrentUser(mockUser());
     const client = createOidcAuthClient({ userManager: um });
-    await new Promise((r) => setTimeout(r, 10));
+    await Promise.resolve();
 
     await client.logout();
     expect(um.signoutRedirect).toHaveBeenCalled();
     expect(client.getState().isAuthenticated).toBe(false);
+    expect(client.getState().error).toBeNull();
   });
 
-  it('renews expired token via signinSilent', async () => {
+  it('coordinates concurrent renewal calls via single-flight mechanism', async () => {
+    let resolveBarrier!: (u: User) => void;
+    const pendingPromise = new Promise<User>((resolve) => {
+      resolveBarrier = resolve;
+    });
+
+    const um = mockUserManager();
+    um.signinSilent = vi.fn(async () => pendingPromise);
+
+    const client = createOidcAuthClient({ userManager: um });
+
+    // Call renewToken 10 times concurrently while signinSilent is pending
+    const concurrentRenewals = Array.from({ length: 10 }, () => client.renewToken());
+
+    expect(um.signinSilent).toHaveBeenCalledTimes(1);
+
+    // Resolve the single signinSilent call
+    const renewedUser = mockUser({ access_token: 'single-flight-token' });
+    resolveBarrier(renewedUser);
+
+    const results = await Promise.all(concurrentRenewals);
+    expect(results).toEqual(Array(10).fill('single-flight-token'));
+
+    // Verify a new renewal CAN be started AFTER completion
+    const nextToken = await client.renewToken();
+    expect(um.signinSilent).toHaveBeenCalledTimes(2);
+    expect(nextToken).toBe('single-flight-token');
+  });
+
+  it('getAccessToken reuses single-flight renewToken path when user is expired', async () => {
     const um = mockUserManager();
     const expiredUser = mockUser({ expired: true });
     um.setCurrentUser(expiredUser);
 
     const client = createOidcAuthClient({ userManager: um });
-    await new Promise((r) => setTimeout(r, 10));
+    await Promise.resolve();
 
     const renewedToken = await client.getAccessToken();
     expect(renewedToken).toBe('renewed-access-token');
-    expect(client.getState().isAuthenticated).toBe(true);
+    expect(um.signinSilent).toHaveBeenCalledTimes(1);
   });
 
-  it('handles token expiration event', async () => {
+  it('handles token expiration event cleanly', async () => {
     const um = mockUserManager();
     um.setCurrentUser(mockUser());
     const client = createOidcAuthClient({ userManager: um });
-    await new Promise((r) => setTimeout(r, 10));
+    await Promise.resolve();
 
     um.tokenExpiredCb?.();
     expect(client.getState().isAuthenticated).toBe(false);
-    expect(client.getState().error).toBe('Session expired');
+    expect(client.getState().error).toBeNull();
   });
 
   it('fails closed when missing production OIDC configuration', async () => {

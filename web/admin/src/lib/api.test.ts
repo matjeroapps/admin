@@ -43,6 +43,46 @@ describe('createApiClient 401 and 403 retry handling', () => {
     expect(onForbidden).not.toHaveBeenCalled();
   });
 
+  it('handles parallel 401 requests by delegating to single-flight renewToken', async () => {
+    let renewCount = 0;
+    const renewToken = vi.fn(async () => {
+      renewCount++;
+      return 'shared-renewed-token';
+    });
+
+    const fetchMock = vi.fn(async (url: URL | string | Request, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      const authHeader = headers.get('Authorization');
+      if (authHeader === 'Bearer shared-renewed-token') {
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const api = createApiClient({
+      baseUrl: 'http://admin.example.com',
+      getAccessToken: async () => 'expired-token',
+      renewToken,
+      onUnauthorized: vi.fn(),
+      onForbidden: vi.fn()
+    });
+
+    // Execute 5 concurrent API requests that return 401
+    const results = await Promise.all([
+      api.get('/v1/admin/suppliers'),
+      api.get('/v1/admin/sellers'),
+      api.get('/v1/admin/stores'),
+      api.get('/v1/admin/products'),
+      api.get('/v1/admin/categories')
+    ]);
+
+    for (const res of results) {
+      expect(res.status).toBe(200);
+    }
+    expect(renewToken).toHaveBeenCalled();
+  });
+
   it('clears session when retry produces 401 again', async () => {
     const fetchMock = vi.fn(async () => {
       return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 });

@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { createApiClient, type ApiConfig } from './lib/api';
+import { createApiClient } from './lib/api';
 import { directionFor, messages, type Locale } from './i18n/locales';
 import { createOidcAuthClient, type AuthClient, type AuthState } from './auth/oidc';
 import './styles.css';
@@ -65,7 +65,7 @@ export function App({ authClient = defaultAuthClient }: { authClient?: AuthClien
       getAccessToken: () => authClient.getAccessToken(),
       renewToken: () => authClient.renewToken(),
       onUnauthorized: () => {
-        void authClient.clearSession('Session expired or unauthorized');
+        void authClient.clearSession();
       },
       onForbidden: () => {
         setIsForbidden(true);
@@ -87,12 +87,13 @@ export function App({ authClient = defaultAuthClient }: { authClient?: AuthClien
     if (window.location.pathname === '/auth/callback') {
       setCallbackProcessing(true);
       authClient
-        .handleCallback()
+        .handleCallback(window.location.href)
         .then((returnPath) => {
           window.history.replaceState({}, document.title, returnPath);
           setCallbackProcessing(false);
         })
         .catch((err) => {
+          window.history.replaceState({}, document.title, '/auth/callback');
           setCallbackProcessing(false);
           setCallbackError(err instanceof Error ? err.message : 'Callback processing failed');
         });

@@ -31,7 +31,7 @@ export interface UserManagerLike {
 export interface AuthClient {
   getAccessToken(): Promise<string | null>;
   renewToken(): Promise<string | null>;
-  clearSession(errorMsg?: string): Promise<void>;
+  clearSession(options?: { error?: string | null }): Promise<void>;
   login(returnPath?: string): Promise<void>;
   handleCallback(url?: string): Promise<string>;
   logout(): Promise<void>;
@@ -48,6 +48,10 @@ export function sanitizeReturnPath(path?: string): string {
   return '/';
 }
 
+export function checkDevAuthEnabled(isDev: boolean, devAuthEnvVal?: string): boolean {
+  return Boolean(isDev && devAuthEnvVal === 'true');
+}
+
 export type OidcClientOptions = {
   userManager?: UserManagerLike;
 };
@@ -58,7 +62,7 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
   const redirectUri = import.meta.env.VITE_ZITADEL_REDIRECT_URI || `${window.location.origin}/auth/callback`;
   const postLogoutRedirectUri = import.meta.env.VITE_ZITADEL_POST_LOGOUT_REDIRECT_URI || window.location.origin;
 
-  const isDevAuthEnabled = Boolean(import.meta.env.DEV && import.meta.env.VITE_ADMIN_DEV_AUTH === 'true');
+  const isDevAuthEnabled = checkDevAuthEnabled(Boolean(import.meta.env.DEV), import.meta.env.VITE_ADMIN_DEV_AUTH);
   const isOidcConfigured = Boolean((issuer && clientId) || options?.userManager);
 
   const listeners = new Set<(state: AuthState) => void>();
@@ -78,6 +82,7 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
   }
 
   let userManager: UserManagerLike | null = options?.userManager ?? null;
+  let renewalPromise: Promise<string | null> | null = null;
 
   if (isOidcConfigured) {
     if (!userManager && issuer && clientId) {
@@ -108,12 +113,12 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
             updateState({ isAuthenticated: false, user: null, isLoading: false, error: null });
           }
         })
-        .catch((err) => {
+        .catch(() => {
           updateState({
             isAuthenticated: false,
             user: null,
             isLoading: false,
-            error: err instanceof Error ? err.message : 'Auth initialization failed'
+            error: null
           });
         });
 
@@ -126,7 +131,7 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
       });
 
       userManager.events.addAccessTokenExpired(() => {
-        updateState({ isAuthenticated: false, user: null, isLoading: false, error: 'Session expired' });
+        updateState({ isAuthenticated: false, user: null, isLoading: false, error: null });
       });
     }
   } else if (isDevAuthEnabled) {
@@ -161,7 +166,8 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
     };
   }
 
-  const clearSession = async (errorMsg: string = 'Session expired'): Promise<void> => {
+  const clearSession = async (options?: { error?: string | null }): Promise<void> => {
+    const errorMsg = options?.error ?? null;
     if (userManager) {
       try {
         await userManager.removeUser();
@@ -175,6 +181,40 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
     updateState({ isAuthenticated: false, user: null, isLoading: false, error: errorMsg });
   };
 
+  async function performRenewal(): Promise<string | null> {
+    if (userManager) {
+      try {
+        const renewed = await userManager.signinSilent();
+        if (renewed && !renewed.expired) {
+          updateState({ isAuthenticated: true, user: mapUser(renewed), isLoading: false, error: null });
+          return renewed.access_token;
+        }
+      } catch {
+        await clearSession();
+        return null;
+      }
+    }
+    if (isDevAuthEnabled) {
+      return sessionStorage.getItem('matjero_admin_dev_token') ?? 'dev-access-token';
+    }
+    await clearSession();
+    return null;
+  }
+
+  const renewToken = async (): Promise<string | null> => {
+    if (renewalPromise) {
+      return renewalPromise;
+    }
+    renewalPromise = (async () => {
+      try {
+        return await performRenewal();
+      } finally {
+        renewalPromise = null;
+      }
+    })();
+    return renewalPromise;
+  };
+
   return {
     async getAccessToken(): Promise<string | null> {
       if (userManager) {
@@ -183,16 +223,7 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
           return user.access_token;
         }
         if (user && user.expired) {
-          try {
-            const renewed = await userManager.signinSilent();
-            if (renewed && !renewed.expired) {
-              updateState({ isAuthenticated: true, user: mapUser(renewed), isLoading: false, error: null });
-              return renewed.access_token;
-            }
-          } catch {
-            await clearSession('Session expired');
-            return null;
-          }
+          return renewToken();
         }
         return null;
       }
@@ -203,26 +234,7 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
       return null;
     },
 
-    async renewToken(): Promise<string | null> {
-      if (userManager) {
-        try {
-          const renewed = await userManager.signinSilent();
-          if (renewed && !renewed.expired) {
-            updateState({ isAuthenticated: true, user: mapUser(renewed), isLoading: false, error: null });
-            return renewed.access_token;
-          }
-        } catch {
-          await clearSession('Session expired');
-          return null;
-        }
-      }
-      if (isDevAuthEnabled) {
-        return sessionStorage.getItem('matjero_admin_dev_token') ?? 'dev-access-token';
-      }
-      await clearSession('Authentication configuration missing');
-      return null;
-    },
-
+    renewToken,
     clearSession,
 
     async login(returnPath?: string): Promise<void> {
@@ -251,8 +263,9 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
     },
 
     async handleCallback(url?: string): Promise<string> {
+      const callbackUrl = url || window.location.href;
       if (userManager) {
-        const user = await userManager.signinRedirectCallback(url);
+        const user = await userManager.signinRedirectCallback(callbackUrl);
         updateState({ isAuthenticated: true, user: mapUser(user), isLoading: false, error: null });
         const stateObj = user.state as { returnPath?: string } | undefined;
         return sanitizeReturnPath(stateObj?.returnPath);
@@ -268,10 +281,10 @@ export function createOidcAuthClient(options?: OidcClientOptions): AuthClient {
         try {
           await userManager.signoutRedirect();
         } finally {
-          await clearSession('Signed out');
+          await clearSession();
         }
       } else {
-        await clearSession('Signed out');
+        await clearSession();
       }
     },
 

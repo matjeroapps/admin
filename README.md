@@ -74,3 +74,19 @@ go work init ./core ./admin
 `go.work` and `go.work.sum` are git-ignored so they can never be committed, and
 no repository may require one.
 
+## ZITADEL OIDC Authentication Configuration
+
+The `admin-web` frontend authenticates users via OAuth 2.0 Authorization Code Flow + PKCE.
+
+### Environment Variables
+- `VITE_ZITADEL_ISSUER`: Base URL of the ZITADEL instance (e.g. `https://zitadel.example.com`).
+- `VITE_ZITADEL_CLIENT_ID`: Public Client ID generated for the Admin SPA application.
+- `VITE_ZITADEL_REDIRECT_URI`: OAuth callback URI (default `${window.location.origin}/auth/callback`).
+- `VITE_ZITADEL_POST_LOGOUT_REDIRECT_URI`: Post-logout redirect URI (default `${window.location.origin}`).
+
+### ZITADEL Application Requirements
+1. **Application Type**: **SPA** (Single Page Application). Public client, PKCE enabled, no client secret.
+2. **Redirect URIs**: Must include `${window.location.origin}/auth/callback` (e.g. `https://admin.example.com/auth/callback`).
+3. **Post Logout Redirect URIs**: Must include `${window.location.origin}`.
+4. **Scopes**: Must permit `openid profile email offline_access`.
+5. **Refresh Tokens**: The ZITADEL SPA application must be configured to permit Refresh Token / Offline Access renewal flow for background session renewal (`signinSilent`).
