@@ -64,8 +64,14 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
   } | null>(null);
   const [actionInFlightDomainId, setActionInFlightDomainId] = React.useState<string | null>(null);
 
-  // Stale request isolation guard
+  // Stale request and view isolation guards
   const requestGenRef = React.useRef(0);
+  const viewGenRef = React.useRef(0);
+
+  // Increment view generation on any view filter or pagination change
+  React.useEffect(() => {
+    viewGenRef.current += 1;
+  }, [debouncedSearch, statusFilter, typeFilter, sellerFilter, storeFilter, offset]);
 
   // Debounce search input
   React.useEffect(() => {
@@ -144,6 +150,7 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
   const handleConfirmAction = async () => {
     if (!pendingAction) return;
     const { domain, type } = pendingAction;
+    const actionViewGen = viewGenRef.current;
     setPendingAction(null);
     setActionInFlightDomainId(domain.id);
     setError(null);
@@ -151,6 +158,10 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
     try {
       const path = `/v1/admin/domains/${encodeURIComponent(domain.id)}/${type}`;
       const res = await api.post(path);
+
+      if (actionViewGen !== viewGenRef.current) {
+        return;
+      }
 
       if (res.status === 409) {
         setError(copy.domainStateChanged);
@@ -164,9 +175,13 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
 
       await loadDomains();
     } catch (err) {
-      setError(err instanceof Error ? err.message : copy.moderationFailed);
+      if (actionViewGen === viewGenRef.current) {
+        setError(err instanceof Error ? err.message : copy.moderationFailed);
+      }
     } finally {
-      setActionInFlightDomainId(null);
+      if (actionViewGen === viewGenRef.current) {
+        setActionInFlightDomainId(null);
+      }
     }
   };
 
@@ -234,55 +249,41 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
           <option value="custom">{copy.custom}</option>
         </select>
 
-        {sellers.length > 0 ? (
-          <select
-            value={sellerFilter}
-            onChange={(e) => { setSellerFilter(e.target.value); setOffset(0); }}
-            aria-label={copy.sellerLabel}
-            className="select"
-          >
-            <option value="">{`${copy.sellerLabel}: ${copy.all}`}</option>
-            {sellers.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} ({s.code})
-              </option>
-            ))}
-          </select>
-        ) : (
-          <input
-            type="text"
-            value={sellerFilter}
-            onChange={(e) => { setSellerFilter(e.target.value); setOffset(0); }}
-            placeholder={copy.sellerLabel}
-            aria-label={copy.sellerLabel}
-            className="input"
-          />
-        )}
+        <input
+          type="text"
+          list="domain-seller-options"
+          value={sellerFilter}
+          onChange={(e) => { setSellerFilter(e.target.value); setOffset(0); }}
+          placeholder={copy.sellerLabel}
+          aria-label={copy.sellerLabel}
+          className="input"
+          data-testid="seller-filter-input"
+        />
+        <datalist id="domain-seller-options">
+          {sellers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name} ({s.code})
+            </option>
+          ))}
+        </datalist>
 
-        {stores.length > 0 ? (
-          <select
-            value={storeFilter}
-            onChange={(e) => { setStoreFilter(e.target.value); setOffset(0); }}
-            aria-label={copy.storeLabel}
-            className="select"
-          >
-            <option value="">{`${copy.storeLabel}: ${copy.all}`}</option>
-            {stores.map((st) => (
-              <option key={st.id} value={st.id}>
-                {st.name} ({st.code})
-              </option>
-            ))}
-          </select>
-        ) : (
-          <input
-            type="text"
-            value={storeFilter}
-            onChange={(e) => { setStoreFilter(e.target.value); setOffset(0); }}
-            placeholder={copy.storeLabel}
-            aria-label={copy.storeLabel}
-            className="input"
-          />
-        )}
+        <input
+          type="text"
+          list="domain-store-options"
+          value={storeFilter}
+          onChange={(e) => { setStoreFilter(e.target.value); setOffset(0); }}
+          placeholder={copy.storeLabel}
+          aria-label={copy.storeLabel}
+          className="input"
+          data-testid="store-filter-input"
+        />
+        <datalist id="domain-store-options">
+          {stores.map((st) => (
+            <option key={st.id} value={st.id}>
+              {st.name} ({st.code})
+            </option>
+          ))}
+        </datalist>
 
         <button type="button" onClick={clearFilters} className="button-secondary" aria-label={copy.clearFilters}>
           {copy.clearFilters}

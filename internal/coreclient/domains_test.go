@@ -184,6 +184,15 @@ func TestDomainClientErrorHandling(t *testing.T) {
 			t.Fatal("expected error on malformed JSON")
 		}
 	})
+
+	t.Run("oversized response", func(t *testing.T) {
+		largeBody := `{"items":[` + strings.Repeat(`{"id":"dom-1","store_id":"str-1","domain":"x.com","is_primary":false,"status":"active","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"},`, 60000) + `{"id":"dom-last","store_id":"str-1","domain":"last.com","is_primary":false,"status":"active","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}]}`
+		stub := newStubCore(t, jsonHandler(http.StatusOK, largeBody))
+		_, err := stub.client(t).ListDomains(context.Background(), DomainFilter{})
+		if err == nil {
+			t.Fatal("expected error on oversized response exceeding maxResponseBytes")
+		}
+	})
 }
 
 func asCoreError(err error, target **Error) bool {

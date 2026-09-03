@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { DomainModerationPanel, type StoreContext, type SellerContext, type StoreDomain } from './DomainModerationPanel';
 
 const sampleStores: StoreContext[] = [
@@ -12,6 +12,10 @@ const sampleSellers: SellerContext[] = [
 ];
 
 describe('DomainModerationPanel', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('renders domain list with platform and custom domains, status badges, and store/seller context', async () => {
     const domains: StoreDomain[] = [
       {
@@ -111,22 +115,263 @@ describe('DomainModerationPanel', () => {
     });
   });
 
-  it('ignores stale async search responses when newer search completes first', async () => {
-    let resolveSearchA: (val: any) => void = () => {};
-    let resolveSearchB: (val: any) => void = () => {};
+  it('handles overlapping search requests deterministically with fake timers', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveSearchA: (val: any) => void = () => {};
+      let resolveSearchB: (val: any) => void = () => {};
 
-    const promiseA = new Promise((resolve) => { resolveSearchA = resolve; });
-    const promiseB = new Promise((resolve) => { resolveSearchB = resolve; });
+      const promiseA = new Promise((resolve) => { resolveSearchA = resolve; });
+      const promiseB = new Promise((resolve) => { resolveSearchB = resolve; });
+
+      const mockApi = {
+        get: vi.fn().mockImplementation((path: string) => {
+          if (path.includes('search=A')) return promiseA;
+          if (path.includes('search=B')) return promiseB;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ items: [] })
+          });
+        }),
+        post: vi.fn()
+      };
+
+      render(
+        <DomainModerationPanel
+          api={mockApi}
+          stores={sampleStores}
+          sellers={sampleSellers}
+          locale="en"
+        />
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(mockApi.get).toHaveBeenCalledTimes(1);
+
+      const searchInput = screen.getByPlaceholderText('Search hostnames');
+
+      // Trigger Search A
+      fireEvent.change(searchInput, { target: { value: 'A' } });
+
+      // Advance debounce by 300ms
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(mockApi.get).toHaveBeenCalledWith(expect.stringContaining('search=A'));
+
+      // Trigger Search B
+      fireEvent.change(searchInput, { target: { value: 'B' } });
+
+      // Advance debounce by 300ms
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(mockApi.get).toHaveBeenCalledWith(expect.stringContaining('search=B'));
+
+      // Resolve B first
+      await act(async () => {
+        resolveSearchB({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [
+              { id: 'dom-B', store_id: 'store-100', domain: 'domain-B.com', is_primary: true, status: 'active', created_at: '', updated_at: '' }
+            ]
+          })
+        });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(screen.getByText('domain-B.com')).toBeDefined();
+
+      // Resolve A late
+      await act(async () => {
+        resolveSearchA({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            items: [
+              { id: 'dom-A', store_id: 'store-100', domain: 'domain-A-LEAK.com', is_primary: false, status: 'active', created_at: '', updated_at: '' }
+            ]
+          })
+        });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      expect(screen.queryByText('domain-A-LEAK.com')).toBeNull();
+      expect(screen.getByText('domain-B.com')).toBeDefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('prevents stale action from reloading or overwriting when view changes before POST completes', async () => {
+    let resolvePostA: (val: any) => void = () => {};
+    let resolveGetB: (val: any) => void = () => {};
+
+    const postAPromise = new Promise((resolve) => { resolvePostA = resolve; });
+    const getBPromise = new Promise((resolve) => { resolveGetB = resolve; });
+
+    const domainA: StoreDomain = {
+      id: 'dom-A', store_id: 'store-100', domain: 'domain-A.com', is_primary: true, status: 'active', domain_type: 'custom', created_at: '', updated_at: ''
+    };
+    const domainB: StoreDomain = {
+      id: 'dom-B', store_id: 'store-100', domain: 'domain-B.com', is_primary: false, status: 'disabled', domain_type: 'custom', created_at: '', updated_at: ''
+    };
 
     const mockApi = {
       get: vi.fn().mockImplementation((path: string) => {
-        if (path.includes('search=A')) return promiseA;
-        if (path.includes('search=B')) return promiseB;
+        if (path.includes('status=disabled')) {
+          return getBPromise;
+        }
         return Promise.resolve({
           ok: true,
           status: 200,
-          json: async () => ({ items: [] })
+          json: async () => ({ items: [domainA] })
         });
+      }),
+      post: vi.fn().mockImplementation(() => postAPromise)
+    };
+
+    render(
+      <DomainModerationPanel
+        api={mockApi}
+        stores={sampleStores}
+        sellers={sampleSellers}
+        locale="en"
+      />
+    );
+
+    // Render View A (status="")
+    await waitFor(() => expect(screen.getByText('domain-A.com')).toBeDefined());
+
+    // Click Disable on domain A
+    fireEvent.click(screen.getByTestId('disable-btn-dom-A'));
+    fireEvent.click(screen.getByTestId('confirm-submit'));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/v1/admin/domains/dom-A/disable'));
+
+    // Switch to View B by changing status filter to "disabled"
+    const statusSelect = screen.getByLabelText('Status');
+    fireEvent.change(statusSelect, { target: { value: 'disabled' } });
+
+    // Resolve B GET call
+    await act(async () => {
+      resolveGetB({
+        ok: true,
+        status: 200,
+        json: async () => ({ items: [domainB] })
+      });
+    });
+
+    // Assert View B data visible
+    await waitFor(() => {
+      expect(screen.getByText('domain-B.com')).toBeDefined();
+      expect(screen.queryByText('domain-A.com')).toBeNull();
+    });
+
+    const getCallCountBeforePostResolve = mockApi.get.mock.calls.length;
+
+    // Now resolve old View A POST
+    await act(async () => {
+      resolvePostA({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...domainA, status: 'disabled' })
+      });
+    });
+
+    expect(screen.getByText('domain-B.com')).toBeDefined();
+    expect(screen.queryByText('domain-A.com')).toBeNull();
+    expect(mockApi.get.mock.calls.length).toBe(getCallCountBeforePostResolve);
+    expect(screen.queryByTestId('domain-error')).toBeNull();
+  });
+
+  it('ignores 409 conflict notice and reload when view changed before action returned 409', async () => {
+    let resolvePost409: (val: any) => void = () => {};
+    let resolveGetB: (val: any) => void = () => {};
+
+    const post409Promise = new Promise((resolve) => { resolvePost409 = resolve; });
+    const getBPromise = new Promise((resolve) => { resolveGetB = resolve; });
+
+    const domainA: StoreDomain = {
+      id: 'dom-A', store_id: 'store-100', domain: 'domain-A.com', is_primary: true, status: 'disabled', domain_type: 'custom', created_at: '', updated_at: ''
+    };
+    const domainB: StoreDomain = {
+      id: 'dom-B', store_id: 'store-100', domain: 'domain-B.com', is_primary: false, status: 'verified', domain_type: 'custom', created_at: '', updated_at: ''
+    };
+
+    const mockApi = {
+      get: vi.fn().mockImplementation((path: string) => {
+        if (path.includes('status=verified')) {
+          return getBPromise;
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [domainA] })
+        });
+      }),
+      post: vi.fn().mockImplementation(() => post409Promise)
+    };
+
+    render(
+      <DomainModerationPanel
+        api={mockApi}
+        stores={sampleStores}
+        sellers={sampleSellers}
+        locale="en"
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('domain-A.com')).toBeDefined());
+
+    // Start Enable on domain A
+    fireEvent.click(screen.getByTestId('enable-btn-dom-A'));
+    fireEvent.click(screen.getByTestId('confirm-submit'));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/v1/admin/domains/dom-A/enable'));
+
+    // Switch to View B (status=verified)
+    const statusSelect = screen.getByLabelText('Status');
+    fireEvent.change(statusSelect, { target: { value: 'verified' } });
+
+    // Resolve B GET
+    await act(async () => {
+      resolveGetB({
+        ok: true,
+        status: 200,
+        json: async () => ({ items: [domainB] })
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText('domain-B.com')).toBeDefined());
+
+    const getCallCountBefore409 = mockApi.get.mock.calls.length;
+
+    // Resolve old action with 409
+    await act(async () => {
+      resolvePost409({
+        ok: false,
+        status: 409,
+        json: async () => ({ error: { code: 'conflict', message: 'domain state changed' } })
+      });
+    });
+
+    expect(screen.getByText('domain-B.com')).toBeDefined();
+    expect(screen.queryByTestId('domain-error')).toBeNull();
+    expect(mockApi.get.mock.calls.length).toBe(getCallCountBefore409);
+  });
+
+  it('allows entering arbitrary Seller ID and Store ID not in props context', async () => {
+    const mockApi = {
+      get: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ items: [] })
       }),
       post: vi.fn()
     };
@@ -142,49 +387,96 @@ describe('DomainModerationPanel', () => {
 
     await waitFor(() => expect(mockApi.get).toHaveBeenCalledTimes(1));
 
-    const searchInput = screen.getByPlaceholderText('Search hostnames');
-
-    // Trigger Search A
-    fireEvent.change(searchInput, { target: { value: 'A' } });
-
-    // Trigger Search B immediately after
-    fireEvent.change(searchInput, { target: { value: 'B' } });
-
-    // Fast-forward debounce timers
-    await waitFor(() => {
-      expect(mockApi.get).toHaveBeenCalledWith(expect.stringContaining('search=B'));
-    });
-
-    // Resolve B first
-    resolveSearchB({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        items: [
-          { id: 'dom-B', store_id: 'store-100', domain: 'domain-B.com', is_primary: true, status: 'active', created_at: '', updated_at: '' }
-        ]
-      })
-    });
+    const sellerInput = screen.getByTestId('seller-filter-input');
+    fireEvent.change(sellerInput, { target: { value: 'seller-999' } });
 
     await waitFor(() => {
-      expect(screen.getByText('domain-B.com')).toBeDefined();
+      const lastCall = mockApi.get.mock.calls[mockApi.get.mock.calls.length - 1][0];
+      expect(lastCall).toContain('seller_id=seller-999');
     });
 
-    // Resolve A late
-    resolveSearchA({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        items: [
-          { id: 'dom-A', store_id: 'store-100', domain: 'domain-A-LEAK.com', is_primary: false, status: 'active', created_at: '', updated_at: '' }
-        ]
-      })
+    const storeInput = screen.getByTestId('store-filter-input');
+    fireEvent.change(storeInput, { target: { value: 'store-999' } });
+
+    await waitFor(() => {
+      const lastCall = mockApi.get.mock.calls[mockApi.get.mock.calls.length - 1][0];
+      expect(lastCall).toContain('store_id=store-999');
+      expect(lastCall).toContain('seller_id=seller-999');
+    });
+  });
+
+  it('sends exact ID when selecting/typing known suggestion', async () => {
+    const mockApi = {
+      get: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ items: [] })
+      }),
+      post: vi.fn()
+    };
+
+    render(
+      <DomainModerationPanel
+        api={mockApi}
+        stores={sampleStores}
+        sellers={sampleSellers}
+        locale="en"
+      />
+    );
+
+    await waitFor(() => expect(mockApi.get).toHaveBeenCalledTimes(1));
+
+    const sellerInput = screen.getByTestId('seller-filter-input');
+    fireEvent.change(sellerInput, { target: { value: 'seller-200' } });
+
+    await waitFor(() => {
+      const lastCall = mockApi.get.mock.calls[mockApi.get.mock.calls.length - 1][0];
+      expect(lastCall).toContain('seller_id=seller-200');
+      expect(lastCall).not.toContain('Beta');
+    });
+  });
+
+  it('proves all query parameters and offset reset on filter changes', async () => {
+    const mockApi = {
+      get: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ items: Array(25).fill(null).map((_, i) => ({
+          id: `dom-${i}`, store_id: 's-1', domain: `d${i}.com`, is_primary: false, status: 'active', created_at: '', updated_at: ''
+        })) })
+      }),
+      post: vi.fn()
+    };
+
+    render(
+      <DomainModerationPanel
+        api={mockApi}
+        stores={sampleStores}
+        sellers={sampleSellers}
+        locale="en"
+      />
+    );
+
+    await waitFor(() => expect(mockApi.get).toHaveBeenCalledTimes(1));
+
+    // Advance to next page (offset=25)
+    fireEvent.click(screen.getByTestId('pagination-next'));
+
+    await waitFor(() => {
+      const lastCall = mockApi.get.mock.calls[mockApi.get.mock.calls.length - 1][0];
+      expect(lastCall).toContain('offset=25');
     });
 
-    // Domain A must NOT leak into the UI
-    await new Promise((r) => setTimeout(r, 50));
-    expect(screen.queryByText('domain-A-LEAK.com')).toBeNull();
-    expect(screen.getByText('domain-B.com')).toBeDefined();
+    // Change status filter -> offset should reset to 0
+    const statusSelect = screen.getByLabelText('Status');
+    fireEvent.change(statusSelect, { target: { value: 'pending' } });
+
+    await waitFor(() => {
+      const lastCall = mockApi.get.mock.calls[mockApi.get.mock.calls.length - 1][0];
+      expect(lastCall).toContain('status=pending');
+      expect(lastCall).toContain('offset=0');
+      expect(lastCall).toContain('limit=25');
+    });
   });
 
   it('handles Disable domain action with modal confirmation and authoritative reload', async () => {
