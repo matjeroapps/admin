@@ -33,15 +33,15 @@ type stubCore struct {
 
 	err error
 
-	counts     map[string]int
-	suppliers  []coreclient.Supplier
-	sellers    []coreclient.Seller
-	stores     []coreclient.Store
-	products   []coreclient.Product
-	categories []coreclient.Category
-	offers     []coreclient.SupplierCatalogItem
-	listings   []coreclient.SellerListing
-	locations  []coreclient.FulfillmentLocation
+	counts       map[string]int
+	suppliers    []coreclient.Supplier
+	sellers      []coreclient.Seller
+	stores       []coreclient.Store
+	products     []coreclient.Product
+	categories   []coreclient.Category
+	offers       []coreclient.SupplierCatalogItem
+	listings     []coreclient.SellerListing
+	locations    []coreclient.FulfillmentLocation
 	domainFilter coreclient.DomainFilter
 	domains      []coreclient.StoreDomain
 	domain       coreclient.StoreDomain
