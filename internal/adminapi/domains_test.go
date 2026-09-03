@@ -1,6 +1,7 @@
 package adminapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -60,8 +61,8 @@ func TestAdminDomainsListForwarding(t *testing.T) {
 	}
 
 	// Verify secret fields privacy on raw body
-	for _, secretField := range []string{"verification_token", "record_value", "challenge"} {
-		if stringContains(string(raw), secretField) {
+	for _, secretField := range []string{"verification_token", "verification", "record_value", "challenge"} {
+		if bytes.Contains(raw, []byte(secretField)) {
 			t.Errorf("response leaked sensitive secret field %q: %s", secretField, string(raw))
 		}
 	}
@@ -226,17 +227,4 @@ func TestAdminDomainsAuthRegression(t *testing.T) {
 			t.Fatalf("expected 200 OK, got %d", rec.Code)
 		}
 	})
-}
-
-func stringContains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsSubstr(s, substr))
-}
-
-func containsSubstr(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

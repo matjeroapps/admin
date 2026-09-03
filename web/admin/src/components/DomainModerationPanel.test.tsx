@@ -740,4 +740,222 @@ describe('DomainModerationPanel', () => {
       expect(screen.getAllByText('Active').length).toBeGreaterThan(0);
     });
   });
+
+  it('unlocks stale action button when returning to view after action finishes out-of-view', async () => {
+    let resolvePostA: (val: any) => void = () => {};
+    let resolveGetB: (val: any) => void = () => {};
+
+    const postAPromise = new Promise((resolve) => { resolvePostA = resolve; });
+    const getBPromise = new Promise((resolve) => { resolveGetB = resolve; });
+
+    const domainA: StoreDomain = {
+      id: 'dom-A', store_id: 'store-100', domain: 'domain-A.com', is_primary: true, status: 'active', domain_type: 'custom', created_at: '', updated_at: ''
+    };
+    const domainB: StoreDomain = {
+      id: 'dom-B', store_id: 'store-100', domain: 'domain-B.com', is_primary: false, status: 'disabled', domain_type: 'custom', created_at: '', updated_at: ''
+    };
+
+    const mockApi = {
+      get: vi.fn().mockImplementation((path: string) => {
+        if (path.includes('status=disabled')) {
+          return getBPromise;
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [domainA] })
+        });
+      }),
+      post: vi.fn().mockImplementation(() => postAPromise)
+    };
+
+    render(
+      <DomainModerationPanel
+        api={mockApi}
+        stores={sampleStores}
+        sellers={sampleSellers}
+        locale="en"
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('domain-A.com')).toBeDefined());
+
+    // Start Disable on domain A
+    fireEvent.click(screen.getByTestId('disable-btn-dom-A'));
+    fireEvent.click(screen.getByTestId('confirm-submit'));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/v1/admin/domains/dom-A/disable'));
+
+    // Switch view to status=disabled
+    const statusSelect = screen.getByLabelText('Status');
+    fireEvent.change(statusSelect, { target: { value: 'disabled' } });
+
+    // Resolve B GET call
+    await act(async () => {
+      resolveGetB({
+        ok: true,
+        status: 200,
+        json: async () => ({ items: [domainB] })
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText('domain-B.com')).toBeDefined());
+
+    // Resolve old Post A while on View B
+    await act(async () => {
+      resolvePostA({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...domainA, status: 'disabled' })
+      });
+    });
+
+    // Switch back to View A (all status)
+    fireEvent.change(statusSelect, { target: { value: '' } });
+
+    await waitFor(() => expect(screen.getByText('domain-A.com')).toBeDefined());
+
+    // Domain A action button MUST be enabled
+    const disableBtn = screen.getByTestId('disable-btn-dom-A') as HTMLButtonElement;
+    expect(disableBtn.disabled).toBe(false);
+  });
+
+  it('handles two concurrent pending domain actions independently', async () => {
+    let resolvePostA: (val: any) => void = () => {};
+    let resolvePostB: (val: any) => void = () => {};
+
+    const postAPromise = new Promise((resolve) => { resolvePostA = resolve; });
+    const postBPromise = new Promise((resolve) => { resolvePostB = resolve; });
+
+    const domainA: StoreDomain = {
+      id: 'dom-A', store_id: 'store-100', domain: 'domain-A.com', is_primary: true, status: 'active', domain_type: 'custom', created_at: '', updated_at: ''
+    };
+    const domainB: StoreDomain = {
+      id: 'dom-B', store_id: 'store-100', domain: 'domain-B.com', is_primary: false, status: 'active', domain_type: 'custom', created_at: '', updated_at: ''
+    };
+
+    const mockApi = {
+      get: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ items: [domainA, domainB] })
+      }),
+      post: vi.fn().mockImplementation((path: string) => {
+        if (path.includes('dom-A')) return postAPromise;
+        if (path.includes('dom-B')) return postBPromise;
+        return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+      })
+    };
+
+    render(
+      <DomainModerationPanel
+        api={mockApi}
+        stores={sampleStores}
+        sellers={sampleSellers}
+        locale="en"
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('domain-A.com')).toBeDefined();
+      expect(screen.getByText('domain-B.com')).toBeDefined();
+    });
+
+    // Disable A
+    fireEvent.click(screen.getByTestId('disable-btn-dom-A'));
+    fireEvent.click(screen.getByTestId('confirm-submit'));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/v1/admin/domains/dom-A/disable'));
+
+    // Disable B
+    fireEvent.click(screen.getByTestId('disable-btn-dom-B'));
+    fireEvent.click(screen.getByTestId('confirm-submit'));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/v1/admin/domains/dom-B/disable'));
+
+    const btnA = screen.getByTestId('disable-btn-dom-A') as HTMLButtonElement;
+    const btnB = screen.getByTestId('disable-btn-dom-B') as HTMLButtonElement;
+
+    expect(btnA.disabled).toBe(true);
+    expect(btnB.disabled).toBe(true);
+
+    // Resolve A only
+    await act(async () => {
+      resolvePostA({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...domainA, status: 'disabled' })
+      });
+    });
+
+    // A should unlock, B MUST remain disabled
+    await waitFor(() => expect(btnA.disabled).toBe(false));
+    expect(btnB.disabled).toBe(true);
+
+    // Resolve B
+    await act(async () => {
+      resolvePostB({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...domainB, status: 'disabled' })
+      });
+    });
+
+    // B should now unlock
+    await waitFor(() => expect(btnB.disabled).toBe(false));
+  });
+
+  it('invalidates view synchronously on user input before passive effects run', async () => {
+    let resolvePostA: (val: any) => void = () => {};
+    const postAPromise = new Promise((resolve) => { resolvePostA = resolve; });
+
+    const domainA: StoreDomain = {
+      id: 'dom-A', store_id: 'store-100', domain: 'domain-A.com', is_primary: true, status: 'active', domain_type: 'custom', created_at: '', updated_at: ''
+    };
+
+    const mockApi = {
+      get: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ items: [domainA] })
+      }),
+      post: vi.fn().mockImplementation(() => postAPromise)
+    };
+
+    render(
+      <DomainModerationPanel
+        api={mockApi}
+        stores={sampleStores}
+        sellers={sampleSellers}
+        locale="en"
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText('domain-A.com')).toBeDefined());
+
+    // Start action on domain A
+    fireEvent.click(screen.getByTestId('disable-btn-dom-A'));
+    fireEvent.click(screen.getByTestId('confirm-submit'));
+
+    await waitFor(() => expect(mockApi.post).toHaveBeenCalledWith('/v1/admin/domains/dom-A/disable'));
+
+    // Trigger raw search input change (synchronous invalidation)
+    const searchInput = screen.getByPlaceholderText('Search hostnames');
+    fireEvent.change(searchInput, { target: { value: 'instant-search' } });
+
+    const getCallCountBeforePostResolve = mockApi.get.mock.calls.length;
+
+    // Immediately resolve Post A within the same interaction flow
+    await act(async () => {
+      resolvePostA({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...domainA, status: 'disabled' })
+      });
+    });
+
+    // Action A was already stale: no reloads triggered by Post A resolve
+    expect(mockApi.get.mock.calls.length).toBe(getCallCountBeforePostResolve);
+    expect(screen.queryByTestId('domain-error')).toBeNull();
+  });
 });
