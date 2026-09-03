@@ -41,6 +41,12 @@ button {
   cursor: pointer;
 }
 
+.button-secondary {
+  background: rgba(16, 33, 31, 0.08);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
 input,
 textarea {
   width: 100%;
