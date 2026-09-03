@@ -72,3 +72,44 @@
 ## 11. OpenAPI & Validation
 - Admin OpenAPI specification in `internal/openapi/specs.go` updated and regenerated at `docs/api/admin/openapi.json`.
 - All backend Go tests (`go test -count=1 ./...`), `go vet`, `gofmt`, `npm run test`, `npm run lint`, `npm run typecheck`, `npm run build`, and `gitleaks` pass with zero failures.
+
+## 12. Post-Merge Corrective Hardening
+
+### Overview
+- **Merged PR**: #4 (commit `6d22220c5a75610051855832c6b1f2308d334397`)
+- **Merge Base SHA**: `c611db032a35096663e0013f5211b943d582428a`
+- **Core Dependency SHA**: `96cf98e5a1f1de3f388a86e316b5b59414d49d11`
+- **Hardening Branch**: `fix/admin-domain-moderation-hardening`
+
+### Technical Improvements & Fixes
+1. **View Generation vs Request Generation Isolation**:
+   - Introduced `viewGenRef` separate from `requestGenRef`.
+   - `viewGenRef` increments whenever user changes the moderation view parameters (search, status filter, domain type filter, seller filter, store filter, pagination offset, or clear filters).
+   - In-flight actions capture `actionViewGen = viewGenRef.current` and verify `actionViewGen === viewGenRef.current` before performing any UI state updates, reloads, or error notices.
+   - Added deterministic regression tests verifying that stale actions do not reload previous views or display stale 409 notices when view navigation occurs while POST is pending.
+
+2. **Platform-Wide Seller & Store Filters**:
+   - Replaced restrictive `<select>` dropdowns with `<input list="...">` and `<datalist>` suggestion controls.
+   - Any arbitrary Seller ID or Store ID accepted by Core can be directly entered, enabling platform-wide moderation beyond loaded context pages.
+   - Loaded context arrays are strictly presentation suggestions.
+   - Added regression tests verifying arbitrary ID forwarding (`seller-999`, `store-999`) and pagination offset resets on filter changes.
+
+3. **Deterministic Stale-Search Regression Test**:
+   - Rewrote stale-search test using Vitest fake timers (`vi.useFakeTimers()`) to deterministically advance debounce timers by 300ms, proving that Search A and Search B both start and remain pending before resolving in reverse order.
+
+4. **Raw-Response Privacy Assertion**:
+   - Fixed backend privacy test in `internal/adminapi/domains_test.go` to capture raw body bytes (`rec.Body.Bytes()`) prior to JSON decoding, eliminating the consumed body check flaw.
+
+5. **Bounded Response Coverage**:
+   - Added `t.Run("oversized response")` in `internal/coreclient/domains_test.go` verifying that responses exceeding `maxResponseBytes` (8 MiB) fail safely without unbounded memory reads.
+
+### Validation Results
+- **Go Tests**: `GOWORK=off go test -count=1 ./...` passed (100% pass rate across packages).
+- **Go Quality**: `gofmt -s -w .`, `git diff --check`, `go vet`, `go mod tidy` clean.
+- **Frontend Tests**: `npm run test` passed (42/42 tests passing across 5 test suites).
+- **Frontend Quality**: `npm run lint`, `npm run typecheck`, `npm run build` green.
+- **OpenAPI**: `GOWORK=off go run ./cmd/openapi-gen` verified 0 semantic diff against `docs/api/admin/openapi.json`.
+- **Fresh Clone**: Tested in isolated directory outside repository tree; all tests and builds passed cleanly.
+- **Docker**: `matjero-admin-api` (`docker/go-app.Dockerfile`) and `matjero-admin-web` (`docker/web-app.Dockerfile`) built successfully.
+- **Security**: OIDC PKCE authentication, RolePlatformAdmin role checks, and secret field privacy intact.
+

@@ -45,10 +45,13 @@ func TestAdminDomainsListForwarding(t *testing.T) {
 		t.Errorf("unexpected forwarded filter: %+v", core.domainFilter)
 	}
 
+	// Capture raw body bytes before decoding payload
+	raw := append([]byte(nil), rec.Body.Bytes()...)
+
 	var payload struct {
 		Items []coreclient.StoreDomain `json:"items"`
 	}
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
+	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatalf("decode JSON payload: %v", err)
 	}
 
@@ -56,11 +59,10 @@ func TestAdminDomainsListForwarding(t *testing.T) {
 		t.Fatalf("unexpected response items: %+v", payload.Items)
 	}
 
-	// Verify secret fields privacy
-	bodyStr := rec.Body.String()
+	// Verify secret fields privacy on raw body
 	for _, secretField := range []string{"verification_token", "record_value", "challenge"} {
-		if stringContains(bodyStr, secretField) {
-			t.Errorf("response leaked sensitive secret field %q: %s", secretField, bodyStr)
+		if stringContains(string(raw), secretField) {
+			t.Errorf("response leaked sensitive secret field %q: %s", secretField, string(raw))
 		}
 	}
 }
