@@ -39,6 +39,9 @@ type CoreCapabilities interface {
 	UpdateListingStatus(ctx context.Context, listingID, status string) error
 	ListLocations(ctx context.Context, supplierID string, page coreclient.Page) ([]coreclient.FulfillmentLocation, error)
 	UpdateLocationStatus(ctx context.Context, locationID, status string) error
+	ListDomains(ctx context.Context, filter coreclient.DomainFilter) ([]coreclient.StoreDomain, error)
+	DisableDomain(ctx context.Context, domainID string) (coreclient.StoreDomain, error)
+	EnableDomain(ctx context.Context, domainID string) (coreclient.StoreDomain, error)
 }
 
 // Dependencies wires the admin routes.
@@ -65,6 +68,9 @@ func RegisterAdminRoutes(deps Dependencies) func(r chi.Router) {
 		r.Post("/admin/listings/{id}/status", deps.handleAdminListingStatus)
 		r.Get("/admin/locations", deps.handleAdminLocations)
 		r.Post("/admin/locations/{id}/status", deps.handleAdminLocationStatus)
+		r.Get("/admin/domains", deps.handleAdminDomains)
+		r.Post("/admin/domains/{id}/disable", deps.handleAdminDisableDomain)
+		r.Post("/admin/domains/{id}/enable", deps.handleAdminEnableDomain)
 	}
 }
 
@@ -200,4 +206,44 @@ func (deps Dependencies) handleAdminLocations(w http.ResponseWriter, r *http.Req
 
 func (deps Dependencies) handleAdminLocationStatus(w http.ResponseWriter, r *http.Request) {
 	deps.updateStatus(w, r, chi.URLParam(r, "id"), deps.Core.UpdateLocationStatus)
+}
+
+func (deps Dependencies) handleAdminDomains(w http.ResponseWriter, r *http.Request) {
+	page := pageFrom(r)
+	q := r.URL.Query()
+	filter := coreclient.DomainFilter{
+		StoreID:    q.Get("store_id"),
+		SellerID:   q.Get("seller_id"),
+		Status:     q.Get("status"),
+		DomainType: q.Get("domain_type"),
+		Search:     q.Get("search"),
+		Page:       page,
+	}
+
+	items, err := deps.Core.ListDomains(r.Context(), filter)
+	if err != nil {
+		actorhttp.WriteCoreError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (deps Dependencies) handleAdminDisableDomain(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	domain, err := deps.Core.DisableDomain(r.Context(), id)
+	if err != nil {
+		actorhttp.WriteCoreError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, domain)
+}
+
+func (deps Dependencies) handleAdminEnableDomain(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	domain, err := deps.Core.EnableDomain(r.Context(), id)
+	if err != nil {
+		actorhttp.WriteCoreError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, domain)
 }

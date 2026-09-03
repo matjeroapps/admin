@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { createApiClient } from './lib/api';
 import { directionFor, messages, type Locale } from './i18n/locales';
 import { createOidcAuthClient, type AuthClient, type AuthState } from './auth/oidc';
+import { DomainModerationPanel } from './components/DomainModerationPanel';
 import './styles.css';
 
 type Bootstrap = {
@@ -375,6 +376,8 @@ export function App({ authClient = defaultAuthClient }: { authClient?: AuthClien
           <EntityList items={locations} renderItem={(location) => <Row key={location.id} title={location.name} meta={`${location.code} · ${location.market_code}`} status={location.status} />} />
         </Panel>
       </section>
+
+      <DomainModerationPanel api={api} stores={stores} sellers={sellers} locale={locale} />
     </main>
   );
 }

@@ -42,6 +42,9 @@ type stubCore struct {
 	offers     []coreclient.SupplierCatalogItem
 	listings   []coreclient.SellerListing
 	locations  []coreclient.FulfillmentLocation
+	domainFilter coreclient.DomainFilter
+	domains      []coreclient.StoreDomain
+	domain       coreclient.StoreDomain
 }
 
 func (s *stubCore) GetOverview(ctx context.Context) (map[string]int, error) {
@@ -126,6 +129,21 @@ func (s *stubCore) ListLocations(ctx context.Context, supplierID string, page co
 func (s *stubCore) UpdateLocationStatus(ctx context.Context, locationID, status string) error {
 	s.id, s.status = locationID, status
 	return s.err
+}
+
+func (s *stubCore) ListDomains(ctx context.Context, filter coreclient.DomainFilter) ([]coreclient.StoreDomain, error) {
+	s.domainFilter = filter
+	return s.domains, s.err
+}
+
+func (s *stubCore) DisableDomain(ctx context.Context, domainID string) (coreclient.StoreDomain, error) {
+	s.id = domainID
+	return s.domain, s.err
+}
+
+func (s *stubCore) EnableDomain(ctx context.Context, domainID string) (coreclient.StoreDomain, error) {
+	s.id = domainID
+	return s.domain, s.err
 }
 
 // newHandler builds the admin routes behind an authenticated platform admin.
