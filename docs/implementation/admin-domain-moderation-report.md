@@ -3,6 +3,7 @@
 ## 1. Governance & Metadata
 - **Branch**: `feature/admin-domain-moderation`
 - **Base SHA**: `5b9d16c26a52c4faa0cd7193d975841cb1ecde7f`
+- **Head SHA**: `7e303c921ee6ad04b77f30ae25eeefaa317cb25e`
 - **Core Dependency SHA**: `96cf98e5a1f1de3f388a86e316b5b59414d49d11`
 - **PR Title**: `feat: add admin domain moderation`
 
