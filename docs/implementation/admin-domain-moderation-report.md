@@ -144,3 +144,9 @@
    - Expanded forbidden privacy fields in `internal/adminapi/domains_test.go` to include `verification_token`, `verification`, `record_value`, and `challenge`.
    - Standardized privacy assertions on raw body using standard library `bytes.Contains`.
 
+5. **Search-Debounce View Transition Fix**:
+   - Added `debouncedSearchRef` tracking committed server-side search state.
+   - When the 300ms search timer fires and `search != debouncedSearchRef.current`, `invalidateView()` is invoked BEFORE applying `setDebouncedSearch(search)`.
+   - Ensures actions initiated during the 300ms search debounce window are marked stale when the server-side search view commits, preventing pre-search view resurrection.
+   - Added deterministic regression test using fake timers and deferred promises.
+

@@ -67,19 +67,24 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
   // Stale request and view isolation guards
   const requestGenRef = React.useRef(0);
   const viewGenRef = React.useRef(0);
+  const debouncedSearchRef = React.useRef(debouncedSearch);
 
   const invalidateView = React.useCallback(() => {
     viewGenRef.current += 1;
   }, []);
 
-  // Debounce search input
+  // Debounce search input with view invalidation on committed server-side search transition
   React.useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedSearch(search);
-      setOffset(0);
+      if (debouncedSearchRef.current !== search) {
+        invalidateView();
+        debouncedSearchRef.current = search;
+        setDebouncedSearch(search);
+        setOffset(0);
+      }
     }, 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, invalidateView]);
 
   // Lookup helpers
   const storeMap = React.useMemo(() => {
@@ -139,6 +144,7 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
   const clearFilters = () => {
     invalidateView();
     setSearch('');
+    debouncedSearchRef.current = '';
     setDebouncedSearch('');
     setStatusFilter('');
     setTypeFilter('');

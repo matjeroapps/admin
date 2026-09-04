@@ -958,4 +958,104 @@ describe('DomainModerationPanel', () => {
     expect(mockApi.get.mock.calls.length).toBe(getCallCountBeforePostResolve);
     expect(screen.queryByTestId('domain-error')).toBeNull();
   });
+
+  it('prevents action started during search debounce window from resurrecting pre-search view when debounce commits', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolvePostA: (val: any) => void = () => {};
+      let resolveGetSearchB: (val: any) => void = () => {};
+
+      const postAPromise = new Promise((resolve) => { resolvePostA = resolve; });
+      const getSearchBPromise = new Promise((resolve) => { resolveGetSearchB = resolve; });
+
+      const domainA: StoreDomain = {
+        id: 'dom-A', store_id: 'store-100', domain: 'domain-A.com', is_primary: true, status: 'active', domain_type: 'custom', created_at: '', updated_at: ''
+      };
+      const domainB: StoreDomain = {
+        id: 'dom-B', store_id: 'store-100', domain: 'domain-B.com', is_primary: false, status: 'active', domain_type: 'custom', created_at: '', updated_at: ''
+      };
+
+      const mockApi = {
+        get: vi.fn().mockImplementation((path: string) => {
+          if (path.includes('search=B')) {
+            return getSearchBPromise;
+          }
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ items: [domainA] })
+          });
+        }),
+        post: vi.fn().mockImplementation(() => postAPromise)
+      };
+
+      render(
+        <DomainModerationPanel
+          api={mockApi}
+          stores={sampleStores}
+          sellers={sampleSellers}
+          locale="en"
+        />
+      );
+
+      // Initial load View A
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(screen.getByText('domain-A.com')).toBeDefined();
+
+      const searchInput = screen.getByPlaceholderText('Search hostnames');
+
+      // Type Search B into raw input
+      fireEvent.change(searchInput, { target: { value: 'B' } });
+
+      // DO NOT advance timer by 300ms yet! Start Disable(A) immediately during debounce window
+      fireEvent.click(screen.getByTestId('disable-btn-dom-A'));
+      fireEvent.click(screen.getByTestId('confirm-submit'));
+
+      expect(mockApi.post).toHaveBeenCalledWith('/v1/admin/domains/dom-A/disable');
+
+      // Now advance debounce by 300ms so debouncedSearch commits to 'B'
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+
+      expect(mockApi.get).toHaveBeenCalledWith(expect.stringContaining('search=B'));
+
+      // Resolve GET search=B
+      await act(async () => {
+        resolveGetSearchB({
+          ok: true,
+          status: 200,
+          json: async () => ({ items: [domainB] })
+        });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      // Assert View B is rendered
+      expect(screen.getByText('domain-B.com')).toBeDefined();
+      expect(screen.queryByText('domain-A.com')).toBeNull();
+
+      const getCallCountBeforePostAResolve = mockApi.get.mock.calls.length;
+
+      // Now resolve the old POST A that started during debounce window
+      await act(async () => {
+        resolvePostA({
+          ok: true,
+          status: 200,
+          json: async () => ({ ...domainA, status: 'disabled' })
+        });
+        await vi.advanceTimersByTimeAsync(0);
+      });
+
+      // Assert View B remains authoritative and Domain A does NOT return
+      expect(screen.getByText('domain-B.com')).toBeDefined();
+      expect(screen.queryByText('domain-A.com')).toBeNull();
+      // NO GET with pre-search filters was triggered by POST A completion
+      expect(mockApi.get.mock.calls.length).toBe(getCallCountBeforePostAResolve);
+      expect(screen.queryByTestId('domain-error')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
