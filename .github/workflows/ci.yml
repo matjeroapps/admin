@@ -107,6 +107,7 @@ jobs:
         with:
           node-version: "22.x"
       - run: GOWORK=off go list -m all
+      - run: npm ci
       - run: npm audit --audit-level=high
       # gitleaks-action v3 requires a paid license for organization accounts;
       # the CLI is MIT-licensed and needs none.
