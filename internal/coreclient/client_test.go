@@ -367,6 +367,32 @@ func TestClientBoundsResponseSize(t *testing.T) {
 	}
 }
 
+func TestClientRejectsValidJSONWithOversizedWhitespace(t *testing.T) {
+	stub := newStubCore(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"markets":[]}`))
+		spaces := strings.Repeat(" ", 1024)
+		for i := 0; i < 8200; i++ {
+			if _, err := w.Write([]byte(spaces)); err != nil {
+				return
+			}
+		}
+	})
+	client := stub.client(t)
+
+	var payload MarketsResponse
+	err := client.get(context.Background(), "/internal/v1/markets", nil, requestOptions{}, &payload)
+	if err == nil {
+		t.Fatal("expected oversized response with trailing whitespace to be rejected")
+	}
+	if !isUnavailable(err) {
+		t.Errorf("expected ErrUnavailable, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "exceeds limit") {
+		t.Errorf("expected error message to report exceeding limit, got %v", err)
+	}
+}
+
 // --- request encoding ---
 
 func TestClientSendsJSONBodyAndContentType(t *testing.T) {

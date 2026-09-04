@@ -113,3 +113,40 @@
 - **Docker**: `matjero-admin-api` (`docker/go-app.Dockerfile`) and `matjero-admin-web` (`docker/web-app.Dockerfile`) built successfully.
 - **Security**: OIDC PKCE authentication, RolePlatformAdmin role checks, and secret field privacy intact.
 
+## 13. Final Action Lifecycle and Transport Bound Hardening
+
+### Overview
+- **PR #4 Merge SHA**: `c611db032a35096663e0013f5211b943d582428a`
+- **PR #5 Merge SHA**: `5c6d0b53f4118774fa96ce01a1a45605dbdfb390`
+- **Base SHA**: `5c6d0b53f4118774fa96ce01a1a45605dbdfb390`
+- **Core Dependency SHA**: `96cf98e5a1f1de3f388a86e316b5b59414d49d11`
+- **Hardening Branch**: `fix/admin-domain-moderation-action-lifecycle`
+
+### Technical Fixes & Enhancements
+1. **Per-Domain Action State (`actionInFlightDomainIds`)**:
+   - Replaced single string `actionInFlightDomainId` with a `Set<string>` state.
+   - Supports multiple simultaneous domain moderation actions.
+   - At action start, adds `domain.id` to `actionInFlightDomainIds`.
+   - In `finally` block, unconditionally deletes `domain.id` from `actionInFlightDomainIds` (not generation-guarded) so stale actions always release their own in-flight marker.
+   - Added regression tests for two concurrent domain actions and stale action unlock upon returning to view.
+
+2. **Synchronous View Invalidation (`invalidateView`)**:
+   - Replaced passive `useEffect` view generation with synchronous `invalidateView()` calls inside user event handlers (`search`, `statusFilter`, `typeFilter`, `sellerFilter`, `storeFilter`, pagination prev/next, clear filters).
+   - Keystroke in raw search input invalidates view generation immediately without waiting 300ms for debounced search.
+   - Added regression test proving instant view staleness without passive effect dependency.
+
+3. **Strict Core Response Size Bound (`maxResponseBytes+1`)**:
+   - Updated shared `coreclient` response reader to use `io.LimitReader(resp.Body, maxResponseBytes+1)`.
+   - Explicitly rejects any payload exceeding `maxResponseBytes` with a wrapped `ErrUnavailable` error before decoding JSON.
+   - Added `TestClientRejectsValidJSONWithOversizedWhitespace` proving rejection of valid JSON followed by trailing whitespace exceeding 8 MiB.
+
+4. **Complete Verification Privacy Assertion**:
+   - Expanded forbidden privacy fields in `internal/adminapi/domains_test.go` to include `verification_token`, `verification`, `record_value`, and `challenge`.
+   - Standardized privacy assertions on raw body using standard library `bytes.Contains`.
+
+5. **Search-Debounce View Transition Fix**:
+   - Added `debouncedSearchRef` tracking committed server-side search state.
+   - When the 300ms search timer fires and `search != debouncedSearchRef.current`, `invalidateView()` is invoked BEFORE applying `setDebouncedSearch(search)`.
+   - Ensures actions initiated during the 300ms search debounce window are marked stale when the server-side search view commits, preventing pre-search view resurrection.
+   - Added deterministic regression test using fake timers and deferred promises.
+

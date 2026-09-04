@@ -187,10 +187,13 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	// Bounded read: a hostile or broken Core cannot exhaust memory.
-	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	// Bounded read with sentinel byte: a hostile or broken Core cannot exhaust memory or silently truncate.
+	payload, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return fmt.Errorf("coreclient: %w: read response: %w", ErrUnavailable, err)
+	}
+	if len(payload) > maxResponseBytes {
+		return fmt.Errorf("coreclient: %w: response body exceeds limit of %d bytes", ErrUnavailable, maxResponseBytes)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {

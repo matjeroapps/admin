@@ -62,25 +62,29 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
     domain: StoreDomain;
     type: 'disable' | 'enable';
   } | null>(null);
-  const [actionInFlightDomainId, setActionInFlightDomainId] = React.useState<string | null>(null);
+  const [actionInFlightDomainIds, setActionInFlightDomainIds] = React.useState<Set<string>>(() => new Set());
 
   // Stale request and view isolation guards
   const requestGenRef = React.useRef(0);
   const viewGenRef = React.useRef(0);
+  const debouncedSearchRef = React.useRef(debouncedSearch);
 
-  // Increment view generation on any view filter or pagination change
-  React.useEffect(() => {
+  const invalidateView = React.useCallback(() => {
     viewGenRef.current += 1;
-  }, [debouncedSearch, statusFilter, typeFilter, sellerFilter, storeFilter, offset]);
+  }, []);
 
-  // Debounce search input
+  // Debounce search input with view invalidation on committed server-side search transition
   React.useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedSearch(search);
-      setOffset(0);
+      if (debouncedSearchRef.current !== search) {
+        invalidateView();
+        debouncedSearchRef.current = search;
+        setDebouncedSearch(search);
+        setOffset(0);
+      }
     }, 300);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, invalidateView]);
 
   // Lookup helpers
   const storeMap = React.useMemo(() => {
@@ -138,7 +142,9 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
   }, [loadDomains]);
 
   const clearFilters = () => {
+    invalidateView();
     setSearch('');
+    debouncedSearchRef.current = '';
     setDebouncedSearch('');
     setStatusFilter('');
     setTypeFilter('');
@@ -152,7 +158,11 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
     const { domain, type } = pendingAction;
     const actionViewGen = viewGenRef.current;
     setPendingAction(null);
-    setActionInFlightDomainId(domain.id);
+    setActionInFlightDomainIds((prev) => {
+      const next = new Set(prev);
+      next.add(domain.id);
+      return next;
+    });
     setError(null);
 
     try {
@@ -179,9 +189,11 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
         setError(err instanceof Error ? err.message : copy.moderationFailed);
       }
     } finally {
-      if (actionViewGen === viewGenRef.current) {
-        setActionInFlightDomainId(null);
-      }
+      setActionInFlightDomainIds((prev) => {
+        const next = new Set(prev);
+        next.delete(domain.id);
+        return next;
+      });
     }
   };
 
@@ -217,7 +229,10 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
         <input
           type="text"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            invalidateView();
+            setSearch(e.target.value);
+          }}
           placeholder={copy.search}
           aria-label={copy.search}
           className="input"
@@ -226,7 +241,11 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
 
         <select
           value={statusFilter}
-          onChange={(e) => { setStatusFilter(e.target.value); setOffset(0); }}
+          onChange={(e) => {
+            invalidateView();
+            setStatusFilter(e.target.value);
+            setOffset(0);
+          }}
           aria-label={copy.statusLabel}
           className="select"
         >
@@ -240,7 +259,11 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
 
         <select
           value={typeFilter}
-          onChange={(e) => { setTypeFilter(e.target.value); setOffset(0); }}
+          onChange={(e) => {
+            invalidateView();
+            setTypeFilter(e.target.value);
+            setOffset(0);
+          }}
           aria-label={copy.domainTypeLabel}
           className="select"
         >
@@ -253,7 +276,11 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
           type="text"
           list="domain-seller-options"
           value={sellerFilter}
-          onChange={(e) => { setSellerFilter(e.target.value); setOffset(0); }}
+          onChange={(e) => {
+            invalidateView();
+            setSellerFilter(e.target.value);
+            setOffset(0);
+          }}
           placeholder={copy.sellerLabel}
           aria-label={copy.sellerLabel}
           className="input"
@@ -271,7 +298,11 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
           type="text"
           list="domain-store-options"
           value={storeFilter}
-          onChange={(e) => { setStoreFilter(e.target.value); setOffset(0); }}
+          onChange={(e) => {
+            invalidateView();
+            setStoreFilter(e.target.value);
+            setOffset(0);
+          }}
           placeholder={copy.storeLabel}
           aria-label={copy.storeLabel}
           className="input"
@@ -317,7 +348,7 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
             const storeLabel = store ? `${store.name} (${store.code})` : `${copy.storeLabel}: ${dom.store_id.slice(0, 8)}`;
             const sellerLabel = seller ? `${seller.name} (${seller.code})` : null;
 
-            const isActionInProgress = actionInFlightDomainId === dom.id;
+            const isActionInProgress = actionInFlightDomainIds.has(dom.id);
 
             return (
               <article key={dom.id} className="row-card" data-testid={`domain-card-${dom.id}`}>
@@ -397,7 +428,10 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
         <button
           type="button"
           disabled={offset === 0 || loading}
-          onClick={() => setOffset((prev) => Math.max(0, prev - limit))}
+          onClick={() => {
+            invalidateView();
+            setOffset((prev) => Math.max(0, prev - limit));
+          }}
           className="button-secondary"
           data-testid="pagination-prev"
         >
@@ -411,7 +445,10 @@ export function DomainModerationPanel({ api, stores, sellers, locale }: DomainMo
         <button
           type="button"
           disabled={domains.length < limit || loading}
-          onClick={() => setOffset((prev) => prev + limit)}
+          onClick={() => {
+            invalidateView();
+            setOffset((prev) => prev + limit);
+          }}
           className="button-secondary"
           data-testid="pagination-next"
         >
