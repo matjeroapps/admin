@@ -14,11 +14,7 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
-    "noEmit": true,
-    "paths": {
-      "@matjerhub/ui-sdk/styles.css": ["../../ui-sdk/packages/ui/src/styles/tokens.css"],
-      "@matjerhub/ui-sdk": ["../../ui-sdk/packages/ui/src/index.ts"]
-    }
+    "noEmit": true
   },
   "include": ["src"]
 }

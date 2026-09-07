@@ -16,8 +16,6 @@ export default defineConfig({
       { find: 'react/jsx-runtime', replacement: path.resolve(__dirname, '../../node_modules/react/jsx-runtime.js') },
       { find: /^react$/, replacement: path.resolve(__dirname, '../../node_modules/react') },
       { find: /^react-dom$/, replacement: path.resolve(__dirname, '../../node_modules/react-dom') },
-      { find: '@matjerhub/ui-sdk/styles.css', replacement: path.resolve(__dirname, '../../ui-sdk/packages/ui/src/styles/tokens.css') },
-      { find: '@matjerhub/ui-sdk', replacement: path.resolve(__dirname, '../../ui-sdk/packages/ui/src/index.ts') }
     ]
   },
   test: {
