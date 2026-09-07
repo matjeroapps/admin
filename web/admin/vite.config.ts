@@ -7,7 +7,7 @@ export default defineConfig({
   plugins: [react()],
   server: {
     fs: {
-      allow: ['/var/www/personal/matjero']
+      allow: [path.resolve(__dirname, '../..')]
     }
   },
   resolve: {
@@ -16,8 +16,8 @@ export default defineConfig({
       { find: 'react/jsx-runtime', replacement: path.resolve(__dirname, '../../node_modules/react/jsx-runtime.js') },
       { find: /^react$/, replacement: path.resolve(__dirname, '../../node_modules/react') },
       { find: /^react-dom$/, replacement: path.resolve(__dirname, '../../node_modules/react-dom') },
-      { find: '@matjerhub/ui/styles.css', replacement: path.resolve(__dirname, '../../../platform/packages/ui/src/styles/tokens.css') },
-      { find: '@matjerhub/ui', replacement: path.resolve(__dirname, '../../../platform/packages/ui/src/index.ts') }
+      { find: '@matjerhub/ui/styles.css', replacement: path.resolve(__dirname, '../../packages/ui/src/styles/tokens.css') },
+      { find: '@matjerhub/ui', replacement: path.resolve(__dirname, '../../packages/ui/src/index.ts') }
     ]
   },
   test: {
