@@ -2,7 +2,7 @@
   "name": "matjero-admin",
   "private": true,
   "workspaces": [
-    "packages/ui",
+    
     "web/admin"
   ],
   "scripts": {
