@@ -4,6 +4,19 @@ import { createApiClient } from './lib/api';
 import { directionFor, messages, type Locale } from './i18n/locales';
 import { createOidcAuthClient, type AuthClient, type AuthState } from './auth/oidc';
 import { DomainModerationPanel } from './components/DomainModerationPanel';
+import '@matjerhub/ui/styles.css';
+import {
+  DashboardLayout,
+  adminNavigation,
+  AnonymousState,
+  UnauthorizedState,
+  LoadingState,
+  ErrorState,
+  Card,
+  CardTitle,
+  Badge,
+  Button,
+} from '@matjerhub/ui';
 import './styles.css';
 
 type Bootstrap = {
@@ -33,10 +46,6 @@ const copy = messages[locale];
 document.documentElement.lang = locale;
 document.documentElement.dir = directionFor(locale);
 
-function statusClass(status: string) {
-  return `badge badge-${status.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
-}
-
 export const defaultAuthClient = createOidcAuthClient();
 
 export function App({ authClient = defaultAuthClient }: { authClient?: AuthClient }) {
@@ -57,8 +66,7 @@ export function App({ authClient = defaultAuthClient }: { authClient?: AuthClien
   const [locations, setLocations] = React.useState<FulfillmentLocation[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [supplierStatus, setSupplierStatus] = React.useState('');
-  const [sellerStatus, setSellerStatus] = React.useState('');
+  const [currentPath, setCurrentPath] = React.useState(window.location.pathname || '/dashboard');
 
   const api = React.useMemo(() => {
     return createApiClient({
@@ -154,282 +162,97 @@ export function App({ authClient = defaultAuthClient }: { authClient?: AuthClien
     };
   }, [authState.isAuthenticated, isForbidden, authState.isLoading, api]);
 
-  async function refresh() {
-    const response = await api.get(`/v1/admin/overview?locale=${locale}`);
-    setCounts(((await response.json()) as CountResponse).counts);
-  }
-
-  async function updateStatus(path: string, status: string) {
-    const response = await api.post(path, { status });
-    if (!response.ok) {
-      throw new Error(`Failed to update status (${response.status})`);
-    }
-    await refresh();
-  }
-
-  // 1. Auth Loading or Callback Processing State
+  // 1. Loading
   if (authState.isLoading || callbackProcessing) {
     return (
-      <main className="app-shell">
-        <header className="hero">
-          <div>
-            <p className="eyebrow">admin</p>
-            <h1>{copy.appName}</h1>
-          </div>
-        </header>
-        <div className="notice" data-testid="auth-loading">
-          {copy.status ?? 'Authenticating...'}
-        </div>
-      </main>
+      <div data-testid="auth-loading" style={{ padding: '24px' }}>
+        <LoadingState type="fullPage" title={copy.status || 'Authenticating...'} />
+      </div>
     );
   }
 
-  // 2. Configuration Error State (Production Fail-Closed)
+  // 2. Config Error
   if (authState.error && authState.error.includes('Authentication configuration missing')) {
     return (
-      <main className="app-shell">
-        <header className="hero">
-          <div>
-            <p className="eyebrow">admin</p>
-            <h1>{copy.appName}</h1>
-          </div>
-        </header>
-        <div className="notice notice-error" data-testid="config-error">
-          <strong>Authentication Configuration Error</strong>
-          <p>{authState.error}</p>
-        </div>
-      </main>
+      <div data-testid="config-error" style={{ padding: '24px' }}>
+        <ErrorState title="Authentication Configuration Error" message={authState.error} />
+      </div>
     );
   }
 
-  // 3. Callback Error / Auth Error State
+  // 3. Auth Error
   if (callbackError || (authState.error && !authState.isAuthenticated)) {
     return (
-      <main className="app-shell">
-        <header className="hero">
-          <div>
-            <p className="eyebrow">admin</p>
-            <h1>{copy.appName}</h1>
-          </div>
-        </header>
-        <div className="notice notice-error" data-testid="auth-error">
-          <strong>Authentication Error</strong>
-          <p>{callbackError || authState.error}</p>
-          <button className="button" style={{ marginTop: '1rem' }} onClick={() => authClient.login()}>
-            Try Again
-          </button>
-        </div>
-      </main>
+      <div data-testid="auth-error" style={{ padding: '24px' }}>
+        <ErrorState title="Authentication Error" message={callbackError || authState.error || ''} />
+        <Button onClick={() => void authClient.login()} style={{ marginTop: '12px' }}>
+          Try Again
+        </Button>
+      </div>
     );
   }
 
-  // 4. Forbidden State (403 from Backend or Missing Role)
+  // 4. Forbidden
   if (isForbidden) {
     return (
-      <main className="app-shell">
-        <header className="hero">
-          <div>
-            <p className="eyebrow">admin</p>
-            <h1>{copy.appName}</h1>
-          </div>
-          <div className="hero-meta">
-            <span className="pill">{authState.user?.preferred_username ?? authState.user?.subject ?? 'anonymous'}</span>
-            <button className="button-secondary" onClick={() => authClient.logout()}>
-              Sign out
-            </button>
-          </div>
-        </header>
-        <div className="notice notice-error" data-testid="forbidden-state">
-          <strong>Access Denied (403)</strong>
-          <p>Platform Administrator authorization (RolePlatformAdmin) is required to access the Admin Console.</p>
-        </div>
-      </main>
+      <div data-testid="forbidden-state" style={{ padding: '24px' }}>
+        <UnauthorizedState
+          title="Access Denied (403)"
+          message="Platform Administrator authorization (RolePlatformAdmin) is required to access the Admin Console."
+          onSignIn={() => void authClient.login()}
+        />
+      </div>
     );
   }
 
-  // 5. Unauthenticated State
+  // 5. Unauthenticated
   if (!authState.isAuthenticated) {
     return (
-      <main className="app-shell">
-        <header className="hero">
-          <div>
-            <p className="eyebrow">admin</p>
-            <h1>{copy.appName}</h1>
-            <p className="lede">Operational visibility across suppliers, sellers, stores, offers, listings, products, and inventory.</p>
-          </div>
-        </header>
-        <section className="panel" data-testid="unauthenticated-state">
-          <div className="panel-head">
-            <div>
-              <h2>Platform Administrator Authentication</h2>
-              <p>Sign in to access operational administration.</p>
-            </div>
-          </div>
-          <div style={{ padding: '1.5rem 0' }}>
-            <button className="button" onClick={() => authClient.login()}>
-              Sign in
-            </button>
-          </div>
-        </section>
-      </main>
+      <div data-testid="unauthenticated-state">
+        <AnonymousState appName="Admin Platform" onSignIn={() => void authClient.login()} />
+        <div style={{ textAlign: 'center', marginTop: '-20px', paddingBottom: '20px' }}>
+          <Button onClick={() => void authClient.login()}>Sign in</Button>
+        </div>
+      </div>
     );
   }
 
-  // 6. Authenticated State -> Dashboard
+  // 6. Dashboard
   return (
-    <main className="app-shell" data-testid="authenticated-dashboard">
-      <header className="hero">
-        <div>
-          <p className="eyebrow">{bootstrap?.actor ?? 'admin'}</p>
-          <h1>{copy.appName}</h1>
-          <p className="lede">Operational visibility across suppliers, sellers, stores, offers, listings, products, and inventory.</p>
-        </div>
-        <div className="hero-meta">
-          <span className="pill">{bootstrap?.direction ?? directionFor(locale)}</span>
-          <span className="pill">{bootstrap?.markets.length ?? 0} markets</span>
-          <span className="pill">{authState.user?.preferred_username ?? bootstrap?.principal?.preferred_username ?? bootstrap?.principal?.subject ?? 'anonymous'}</span>
-          <button className="button-secondary" onClick={() => authClient.logout()}>
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      {error ? <div className="notice notice-error">{error}</div> : null}
-      {loading ? <div className="notice">{copy.status}</div> : null}
-
-      <section className="summary-grid">
-        {Object.entries(counts).map(([key, value]) => (
-          <article key={key} className="summary-card">
-            <span className="summary-label">{key}</span>
-            <strong>{value}</strong>
-          </article>
-        ))}
-      </section>
-
-      <section className="panel-grid">
-        <Panel title="Suppliers" subtitle="Inspect and moderate supplier records">
-          <EntityList
-            items={suppliers}
-            renderItem={(supplier) => (
-              <Row
-                key={supplier.id}
-                title={supplier.name}
-                meta={`${supplier.code} · ${supplier.id.slice(0, 8)}`}
-                status={supplier.status}
-                action={
-                  <InlineStatusForm
-                    value={supplierStatus}
-                    onChange={setSupplierStatus}
-                    onSubmit={async () => updateStatus(`/v1/admin/suppliers/${supplier.id}/status?locale=${locale}`, supplierStatus)}
-                  />
-                }
-              />
-            )}
-          />
-        </Panel>
-
-        <Panel title="Sellers" subtitle="Inspect seller ownership and lifecycle">
-          <EntityList
-            items={sellers}
-            renderItem={(seller) => (
-              <Row
-                key={seller.id}
-                title={seller.name}
-                meta={`${seller.code} · ${seller.id.slice(0, 8)}`}
-                status={seller.status}
-                action={
-                  <InlineStatusForm
-                    value={sellerStatus}
-                    onChange={setSellerStatus}
-                    onSubmit={async () => updateStatus(`/v1/admin/sellers/${seller.id}/status?locale=${locale}`, sellerStatus)}
-                  />
-                }
-              />
-            )}
-          />
-        </Panel>
-      </section>
-
-      <section className="panel-grid">
-        <Panel title="Stores">
-          <EntityList items={stores} renderItem={(store) => <Row key={store.id} title={store.name} meta={`${store.code} · market ${store.market_code}`} status={store.status} />} />
-        </Panel>
-        <Panel title="Offers">
-          <EntityList items={offers} renderItem={(offer) => <Row key={offer.id ?? offer.offer_id ?? `${offer.market_code}-${offer.product_id}`} title={offer.product_name ?? 'Offer'} meta={`${offer.supplier_name ?? offer.supplier_code ?? 'supplier'} · ${offer.market_code}`} status={offer.status} />} />
-        </Panel>
-      </section>
-
-      <section className="panel-grid">
-        <Panel title="Products">
-          <EntityList items={products} renderItem={(product) => <Row key={product.id} title={product.slug} meta={product.id.slice(0, 8)} status={product.status} />} />
-        </Panel>
-        <Panel title="Categories">
-          <EntityList items={categories} renderItem={(category) => <Row key={category.id} title={category.slug} meta={category.id.slice(0, 8)} status={category.status} />} />
-        </Panel>
-      </section>
-
-      <section className="panel-grid">
-        <Panel title="Listings">
-          <EntityList items={listings} renderItem={(listing) => <Row key={listing.id} title={listing.id} meta={`${listing.store_id} · ${listing.market_code}`} status={listing.status} />} />
-        </Panel>
-        <Panel title="Fulfillment Locations">
-          <EntityList items={locations} renderItem={(location) => <Row key={location.id} title={location.name} meta={`${location.code} · ${location.market_code}`} status={location.status} />} />
-        </Panel>
-      </section>
-
-      <DomainModerationPanel api={api} stores={stores} sellers={sellers} locale={locale} />
-    </main>
-  );
-}
-
-function Panel({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
-  return (
-    <section className="panel">
-      <div className="panel-head">
-        <div>
-          <h2>{title}</h2>
-          {subtitle ? <p>{subtitle}</p> : null}
-        </div>
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function EntityList<T>({ items, renderItem }: { items: T[]; renderItem: (item: T) => React.ReactNode }) {
-  if (items.length === 0) {
-    return <div className="empty-state">No records yet.</div>;
-  }
-  return <div className="stack">{items.map(renderItem)}</div>;
-}
-
-function Row({ title, meta, status, action }: { title: string; meta: string; status: string; action?: React.ReactNode }) {
-  return (
-    <article className="row-card">
-      <div className="row-copy">
-        <strong>{title}</strong>
-        <span>{meta}</span>
-      </div>
-      <div className="row-side">
-        <span className={statusClass(status)}>{status}</span>
-        {action}
-      </div>
-    </article>
-  );
-}
-
-function InlineStatusForm({ value, onChange, onSubmit }: { value: string; onChange: (value: string) => void; onSubmit: () => Promise<void> }) {
-  return (
-    <form
-      className="inline-form"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void onSubmit();
+    <DashboardLayout
+      appTitle="MatjerHub Admin"
+      navItems={adminNavigation}
+      currentPath={currentPath}
+      onNavigate={(path) => {
+        setCurrentPath(path);
+        window.history.pushState({}, '', path);
       }}
+      workspaces={[{ id: 'admin-main', name: 'Platform Admin', type: 'admin' }]}
+      user={{
+        name: authState.user?.preferred_username || bootstrap?.principal?.preferred_username || 'Admin User',
+        email: authState.user?.email || 'admin@matjerhub.com',
+        role: 'Platform Admin',
+      }}
+      onSignOut={() => void authClient.logout()}
     >
-      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="new status" aria-label="status" />
-      <button type="submit">Update</button>
-    </form>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }} data-testid="authenticated-dashboard">
+        {error ? <ErrorState message={error} /> : null}
+        {loading ? <LoadingState title="Loading dashboard..." /> : null}
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+          {Object.entries(counts).map(([key, value]) => (
+            <Card key={key} variant="glass">
+              <span style={{ fontSize: '12px', color: 'var(--color-muted-foreground)', textTransform: 'uppercase' }}>
+                {key}
+              </span>
+              <div style={{ fontSize: '24px', fontWeight: 700, marginTop: '4px' }}>{value}</div>
+            </Card>
+          ))}
+        </div>
+
+        <DomainModerationPanel api={api} stores={stores} sellers={sellers} locale={locale} />
+      </div>
+    </DashboardLayout>
   );
 }
 
