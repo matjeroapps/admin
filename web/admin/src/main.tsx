@@ -4,7 +4,7 @@ import { createApiClient } from './lib/api';
 import { directionFor, messages, type Locale } from './i18n/locales';
 import { createOidcAuthClient, type AuthClient, type AuthState } from './auth/oidc';
 import { DomainModerationPanel } from './components/DomainModerationPanel';
-import '@matjerhub/ui/styles.css';
+import '@matjerhub/ui-sdk/styles.css';
 import {
   DashboardLayout,
   adminNavigation,
@@ -16,7 +16,7 @@ import {
   CardTitle,
   Badge,
   Button,
-} from '@matjerhub/ui';
+} from '@matjerhub/ui-sdk';
 import './styles.css';
 
 type Bootstrap = {
