@@ -12,7 +12,7 @@
     "test": "node ../../scripts/check-locales.mjs admin && vitest run"
   },
   "dependencies": {
-    "@matjerhub/ui": "file:../../packages/ui",
+    "@matjerhub/ui": "file:../../ui-sdk/packages/ui",
     "@vitejs/plugin-react": "^5.0.1",
     "oidc-client-ts": "^3.5.0",
     "react": "^19.1.1",

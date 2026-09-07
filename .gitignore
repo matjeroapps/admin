@@ -8,3 +8,4 @@ coverage/
 *.log
 go.work
 go.work.sum
+ui-sdk
